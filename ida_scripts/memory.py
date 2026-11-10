@@ -9,6 +9,10 @@ from . import compat
 from .compat import IN_IDA
 from .utils import *
 
+if TYPE_CHECKING:
+	from .func import Func
+	from .module import Module
+
 if IN_IDA:
 	import ida_bytes
 	import ida_name
