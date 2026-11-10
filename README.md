@@ -121,7 +121,13 @@ In Claude Code, install it together with this library:
 claude plugin install ida-scripts --marketplace Zerui18/ida_scripts
 ```
 
-To use a clone of this repository instead, link the skill into your skills folder:
+To use a clone of this repository instead, install from its folder. Claude Code then reads the plugin from the clone in place, on Windows too (`C:\path\to\ida_scripts`):
+
+```
+claude plugin install ida-scripts --marketplace /path/to/ida_scripts
+```
+
+On macOS and Linux, linking only the skill into your skills folder works as well:
 
 ```
 ln -s /path/to/ida_scripts/skills/ida-scripts ~/.claude/skills/ida-scripts
