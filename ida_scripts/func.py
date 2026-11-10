@@ -603,7 +603,8 @@ class Func:
 		func_data = ida_typeinf.func_type_data_t()
 		if not tif or not tif.get_func_details(func_data):
 			return {}
-		return { arg.name:arg.type for arg in func_data }
+		# Copies: an argument's own type belongs to func_data and goes with it.
+		return { arg.name : arg.type.copy() for arg in func_data }
 
 	@property
 	def comment(self) -> str:
