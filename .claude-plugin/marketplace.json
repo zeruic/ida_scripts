@@ -1,0 +1,13 @@
+{
+  "name": "ida-scripts",
+  "owner": {
+    "name": "Zerui18"
+  },
+  "plugins": [
+    {
+      "name": "ida-scripts",
+      "source": "./",
+      "description": "A skill for reverse engineering and debugging with IDA Pro 9.x through ida_scripts, the Python library in this repository."
+    }
+  ]
+}

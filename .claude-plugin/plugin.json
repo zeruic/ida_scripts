@@ -1,0 +1,9 @@
+{
+  "name": "ida-scripts",
+  "description": "A skill for reverse engineering and debugging with IDA Pro 9.x through ida_scripts, the Python library in this repository.",
+  "author": {
+    "name": "Zerui18"
+  },
+  "homepage": "https://github.com/Zerui18/ida_scripts",
+  "repository": "https://github.com/Zerui18/ida_scripts"
+}
