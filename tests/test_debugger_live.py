@@ -1,6 +1,6 @@
 ''' `ida_scripts.debugger` against a real process under IDA's local debugger.
 
-Builds `tests/fixtures/live/debug_target.c` with the first C compiler it finds, opens a fresh database of it, and debugs it step by step: start, a breakpoint by name, registers, memory, a call into the process, a module-relative breakpoint, handlers, `run_to` and `stop`.
+Builds `tests/fixtures/live/debug_target.c` with the first C compiler it finds, opens a fresh database of it, and debugs it step by step: start, a breakpoint by name, registers, memory, a call into the process, a module-relative breakpoint, handlers, `run_to`, detach and attach, and `stop`.
 
 A first start is tried in a child process with a time limit. When the system refuses to let IDA debug (macOS without the needed permissions, say), every step is skipped with the reason IDA gave, and nothing is left running. Each step after a failed one is skipped too, naming the step that failed.
 
@@ -413,7 +413,7 @@ class TestLiveDebugging(unittest.TestCase):
 			self.assertTrue(self.dbg.suspend(), 'suspend() suspends the process the handler kept running')
 		relative.handler = lambda event: True
 		events = []
-		# A suspension can leave an event of its own for the next resume (Windows pauses a process by making it break in a new thread).
+		# A suspension may leave an event of its own for the next resume. IDA's win32 debugger does not: it reports the suspension in the thread that was running.
 		while len(events) < 3 and (not events or events[-1].address != relative.address):
 			with self.doing('resuming with a handler that returns True'):
 				events.append(self.dbg.resume(timeout=STEP_TIMEOUT))
@@ -431,7 +431,34 @@ class TestLiveDebugging(unittest.TestCase):
 		self.assertEqual(self.dbg.state, 'suspended', 'the process is suspended after run_to()')
 
 	@step
-	def test_09_stop(self):
+	def test_09_detach_and_attach(self):
+		pid, main = self.report()['pid'], self.session['main']
+		with self.doing('detaching'):
+			self.assertTrue(self.dbg.detach(), 'detach() lets go of the process')
+		self.assertEqual(self.dbg.state, 'none', 'no process is debugged after detach()')
+		self.assertEqual((self.dbg.event.kind, self.dbg.event.info, self.dbg.event.pid), ('process_exit', 'detached', pid), f'detach() records the process_exit event of the process, got {self.dbg.event}')
+		self.assertIn(pid, running_copies(), f'the target (pid {pid}) runs on after detach()')
+		with self.doing(f'attaching to process {pid}'):
+			event = self.dbg.attach(pid, debugger=self.debugger, timeout=STEP_TIMEOUT)
+		self.assertEqual((event.kind, event.info, event.pid), ('process_start', 'attached', pid), f'attach() returns the process_start event of the process, got {event}')
+		self.assertEqual(self.dbg.state, 'suspended', 'the process is suspended after attach()')
+		found = Module.find(EXECUTABLE)
+		self.assertIsNotNone(found, f'Module.find({EXECUTABLE!r}) finds the target after attach(), among {Module.all_modules()}')
+		self.assertEqual(found.addr, main.addr, f'the target is where it was before detach(), at {hex(main.addr)}')
+		self.assertGreater(len(self.dbg.modules), 1, f'dbg.modules has the libraries the process had loaded before attach(), got {self.dbg.modules}')
+		with self.doing('adding a breakpoint at tick again'):
+			breakpoint = debugger.Breakpoint.add(self.session['tick'])
+		events = []
+		# The system may attach in a thread of its own (Windows does), which can report something before tick is reached.
+		while len(events) < 3 and (not events or events[-1].address != breakpoint.address):
+			with self.doing('resuming the attached process to tick'):
+				events.append(self.dbg.resume(timeout=STEP_TIMEOUT))
+		self.assertEqual(events[-1].address, self.session['tick_address'], f'the attached process stops at the breakpoint at tick, got {events}')
+		with self.doing('removing the breakpoint at tick'):
+			self.assertTrue(breakpoint.remove(), 'the breakpoint is removed')
+
+	@step
+	def test_10_stop(self):
 		pid = self.report()['pid']
 		with self.doing('stopping the process'):
 			self.assertTrue(self.dbg.stop(), 'stop() ends the process')
