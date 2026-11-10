@@ -10,7 +10,9 @@ The process runs a `program`: a list of steps, taken one by one while it runs, e
 
 When the program runs out, the process runs forever: waits time out.
 
-The model follows IDA 9.4 where it was observed (the breakpoint calls, including their return values), and otherwise the documentation of the stubs. It is strict where IDA's behaviour is unknown: a module-relative breakpoint resolves only when its path is the module's full path, and IDA does not select the thread of an event.
+The model follows IDA 9.4 as it was observed debugging a real process with the win32 debugger: which notifications come and in what order, what the events carry, how a module-relative breakpoint finds its module, and what the breakpoint calls return. Otherwise it follows the documentation of the stubs.
+
+It is stricter than IDA in one thing: IDA selects the thread of an event and the fake does not, so the module has to. `places_by_file_name` turns off what only the win32 debugger is known to do.
 '''
 
 import sys
@@ -70,7 +72,9 @@ class FakeIDA:
 		self.attachable = 4343
 		self.exits_on_request = True
 		self.lists_modules = True
+		self.places_by_file_name = True
 		self.main_threads = { 1 : {} }
+		self.loaded_before = []
 		self.process_memory = []
 		self.copy_database = False
 
@@ -107,7 +111,8 @@ class FakeIDA:
 		if self.loaded is None:
 			return -4
 		if pid != self.attachable:
-			return -2
+			# Observed: -1 for a process id that does not exist, not -2.
+			return -1
 		self.launch(pid)
 		self.program.insert(0, ('attach',))
 		return 1
@@ -169,7 +174,10 @@ class FakeIDA:
 			if kind == 'suspend':
 				return self.make(I.PROCESS_SUSPENDED, ea=self.threads[self.current_tid].regs['PC'])
 			if kind == 'detach':
-				return self.make(I.PROCESS_DETACHED)
+				# Observed: the detach event names no process and no thread.
+				event = self.make(I.PROCESS_DETACHED, 0)
+				event.pid = -1
+				return event
 			if self.exits_on_request:
 				event = self.make(I.PROCESS_EXITED)
 				event._exit_code = -9
@@ -183,8 +191,12 @@ class FakeIDA:
 	def execute(self, step):
 		kind, args = step[0], step[1:]
 		if kind in ('start', 'attach'):
-			event = self.make(I.PROCESS_STARTED if kind == 'start' else I.PROCESS_ATTACHED, ea=self.main_base)
+			# Observed: the start event has no address. An attach has the address its thread is at.
+			event = self.make(I.PROCESS_STARTED, ea=BADADDR) if kind == 'start' else self.make(I.PROCESS_ATTACHED, ea=self.main_base)
 			self.loaded_module(event, self.input_path, self.main_base, self.image_size)
+			if kind == 'attach':
+				# Observed: the libraries a process has when it is attached to are listed, and no load event comes for them.
+				self.modules += [list(module) for module in self.loaded_before]
 			return event
 		if kind == 'load':
 			event = self.make(I.LIB_LOADED, ea=args[1])
@@ -268,13 +280,17 @@ class FakeIDA:
 			elif eid == I.INFORMATION:
 				hook.dbg_information(pid, tid, ea, event.info())
 			elif eid == I.EXCEPTION:
-				hook.dbg_exception(pid, tid, ea, event.exc().code, True, event.exc().ea, event.exc().info)
-			elif eid == I.PROCESS_SUSPENDED:
-				hook.dbg_suspend_process()
+				# Observed: the notification has the code as a signed int, the event has it unsigned.
+				code = event.exc().code
+				hook.dbg_exception(pid, tid, ea, code - (1 << 32) if code & 0x80000000 else code, True, event.exc().ea, event.exc().info)
 			elif eid == I.BREAKPOINT and event._run_to:
 				hook.dbg_run_to(pid, tid, ea)
 			elif eid == I.BREAKPOINT:
 				hook.dbg_bpt(tid, ea)
+		# Observed: IDA tells of every suspension, behind the event's own notification, unless a hook continued the process from inside that.
+		if suspends and self.state == D.DSTATE_SUSP:
+			for hook in list(self.hooks):
+				hook.dbg_suspend_process()
 		if eid in (I.PROCESS_EXITED, I.PROCESS_DETACHED):
 			self.end()
 
@@ -375,8 +391,11 @@ class FakeIDA:
 	def resolved(self, record):
 		if record['kind'] == D.BPLT_ABS:
 			return record['ea']
+		# Observed: the path places the breakpoint when it is the module's full path as the debugger reports it, or only a file name, ignoring case. The same path spelled another way does not.
+		path = record['path'].lower()
 		for name, base, size in self.modules:
-			if name.lower() == record['path'].lower():
+			name = name.lower()
+			if path == name or (self.places_by_file_name and path == name.replace('\\', '/').rsplit('/', 1)[-1]):
 				return base + record['offset']
 		return BADADDR
 
@@ -430,7 +449,7 @@ class FakeIDA:
 		if record is None:
 			return False
 		record['flags'] = record['flags'] | D.BPT_ENABLED if enable else record['flags'] & ~D.BPT_ENABLED
-		# Observed: with a location, IDA 9.4 does it but returns False.
+		# Observed on macOS: with a location, IDA 9.4 does it but returns False. On Windows it returns True.
 		return not located
 
 	# CALLS

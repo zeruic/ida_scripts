@@ -153,6 +153,7 @@ class TestStart(FakeTestCase):
 		self.assertEqual(event.module, self.ida.input_path)
 		self.assertEqual(event.pid, 4242)
 		self.assertEqual(event.tid, 1)
+		self.assertIsNone(event.address)
 		self.assertEqual(self.dbg.state, 'suspended')
 		self.assertIs(self.dbg.event, event)
 		self.assertEqual(self.dbg.events, [event])
@@ -343,6 +344,22 @@ class TestRun(FakeTestCase):
 		self.assertEqual((self.dbg.event.kind, self.dbg.state), ('suspended', 'suspended'))
 		self.assertIn(('suspend_process',), self.ida.calls)
 
+	def test_a_suspension_is_one_event(self):
+		self.start([('exec', 1, sym('compute')), ('exception', 1, sym('leaf'), 0xC0000005, 'access violation')])
+		debugger.Breakpoint.add('_compute')
+		told = []
+		hooks = type(self.dbg._hooks)
+		with mock.patch.object(hooks, 'dbg_suspend_process', lambda hook, original=hooks.dbg_suspend_process: told.append(self.ida.event.eid()) or original(hook)):
+			self.assertEqual(self.dbg.resume().kind, 'breakpoint')
+			self.assertEqual(self.dbg.resume().kind, 'exception')
+			self.dbg.resume(timeout=0)
+			self.assertTrue(self.dbg.suspend())
+			self.dbg.resume(timeout=0)
+			self.assertTrue(self.dbg.suspend())
+		self.assertEqual(told, [I.BREAKPOINT, I.EXCEPTION, I.PROCESS_SUSPENDED, I.PROCESS_SUSPENDED])
+		self.assertEqual([e.kind for e in self.dbg.events], ['process_start', 'breakpoint', 'exception', 'suspended', 'suspended'])
+		self.assertIs(self.dbg.event, self.dbg.events[-1])
+
 	def test_stop(self):
 		self.start()
 		self.assertTrue(self.dbg.stop())
@@ -366,7 +383,7 @@ class TestRun(FakeTestCase):
 		self.start()
 		self.assertTrue(self.dbg.detach())
 		self.assertEqual(self.dbg.state, 'none')
-		self.assertEqual((self.dbg.event.kind, self.dbg.event.info), ('process_exit', 'detached'))
+		self.assertEqual((self.dbg.event.kind, self.dbg.event.info, self.dbg.event.pid), ('process_exit', 'detached', 4242))
 
 	def test_attach(self):
 		event = self.dbg.attach(4343)
@@ -376,15 +393,32 @@ class TestRun(FakeTestCase):
 		with self.assertRaisesRegex(DebuggerError, 'already being debugged'):
 			self.dbg.attach(4343)
 
+	def test_attach_takes_the_modules_loaded_before(self):
+		self.ida.loaded_before = [(LIB, LIB_BASE, 0x1000)]
+		self.dbg.attach(4343)
+		self.assertEqual([e.kind for e in self.dbg.events], ['process_start'])
+		self.assertEqual(self.dbg.modules, [Module(self.ida.input_path, self.ida.image_base, self.ida.image_size), Module(LIB, LIB_BASE, 0x1000)])
+		self.ida.lists_modules = False
+		self.assertEqual(Module.find('libengine.dylib'), Module(LIB, LIB_BASE, 0x1000))
+
 	def test_attach_fails(self):
-		with self.assertRaisesRegex(DebuggerError, 'attaching to process 1: there is no compatible process with that id'):
+		with self.assertRaisesRegex(DebuggerError, r'attaching to process 1: the debugger could not attach \(there is no such process, or permission is missing\)'):
 			self.dbg.attach(1)
 		self.assertEqual(self.dbg.state, 'none')
+		with mock.patch.object(self.ida, 'attach_process', lambda pid, event_id=-1: -2):
+			with self.assertRaisesRegex(DebuggerError, 'attaching to process 1: there is no compatible process with that id'):
+				self.dbg.attach(1)
 
 	def test_exception(self):
 		self.start([('exception', 1, sym('compute'), 0xC0000005, 'access violation')])
 		event = self.dbg.resume()
 		self.assertEqual((event.kind, event.code, event.info, event.address), ('exception', 0xC0000005, 'access violation', sym('compute')))
+
+	def test_exception_the_hooks_missed(self):
+		self.start([('exception', 1, sym('compute'), 0xC0000005, 'access violation')])
+		self.dbg._hooks.unhook()
+		event = self.dbg.resume()
+		self.assertEqual((event.kind, event.code, event.info), ('exception', 0xC0000005, 'access violation'))
 
 	def test_events(self):
 		self.start([('info', 'hello'), ('load', LIB, LIB_BASE, 0x1000), ('unload', LIB), ('thread', 2), ('thread_exit', 2, 5), ('exit', 1)])
@@ -505,6 +539,14 @@ class TestHandlers(FakeTestCase):
 		self.assertEqual(self.dbg.state, 'suspended')
 		self.assertEqual(debugger.Breakpoint.find('_add').hits, 2)
 		self.assertEqual([c for c in self.ida.calls if c[0] == 'run_requests'], [('run_requests', ['continue'])] * 2)
+
+	def test_a_suspension_after_a_handler_let_the_process_run_on(self):
+		debugger.Breakpoint.add('_add', handler=lambda event: None)
+		self.start([('exec', 1, sym('add'))])
+		self.ida.pump()
+		self.assertEqual((self.dbg.state, self.dbg.event.kind), ('running', 'breakpoint'))
+		self.assertTrue(self.dbg.suspend())
+		self.assertEqual([e.kind for e in self.dbg.events], ['process_start', 'breakpoint', 'suspended'])
 
 	def test_on_and_off(self):
 		loads, starts = [], []
@@ -780,7 +822,7 @@ class TestBreakpoints(FakeTestCase):
 		self.assertEqual((event.kind, event.address), ('breakpoint', LIB_BASE + 0x40))
 		self.assertEqual(seen, [event])
 		self.assertEqual(breakpoint.address, LIB_BASE + 0x40)
-		self.assertEqual(breakpoint.module, LIB)
+		self.assertEqual(breakpoint.module, 'libengine.dylib')
 		self.assertEqual(breakpoint.hits, 1)
 		self.assertEqual(debugger.Breakpoint.find(0x40, module='LIBENGINE.DYLIB'), breakpoint)
 		self.assertEqual(debugger.Breakpoint.find(0x40, module=LIB), breakpoint)
@@ -788,7 +830,25 @@ class TestBreakpoints(FakeTestCase):
 		self.assertIsNone(debugger.Breakpoint.find(0x44, module=LIB))
 		self.assertEqual(len(self.ida.bpts), 1)
 
+	def test_module_relative_where_only_the_full_path_places_it(self):
+		self.ida.places_by_file_name = False
+		seen = []
+		breakpoint = debugger.Breakpoint.add(0x40, module='LibEngine.dylib', handler=lambda event: seen.append(event) or True)
+		self.start([('load', LIB, LIB_BASE, 0x10000), ('exec', 1, LIB_BASE + 0x40), ('exit', 0)])
+		event = self.dbg.resume()
+		self.assertEqual((event.kind, event.address), ('breakpoint', LIB_BASE + 0x40))
+		self.assertEqual(seen, [event])
+		self.assertEqual((breakpoint.address, breakpoint.module, breakpoint.hits), (LIB_BASE + 0x40, LIB, 1))
+		self.assertEqual(len(self.ida.bpts), 1)
+
+	def test_module_relative_by_a_path_spelled_another_way(self):
+		breakpoint = debugger.Breakpoint.add(0x40, module='/opt/game/../game/libengine.dylib')
+		self.start([('load', LIB, LIB_BASE, 0x10000), ('exec', 1, LIB_BASE + 0x40), ('exit', 0)])
+		self.assertEqual(self.dbg.resume().address, LIB_BASE + 0x40)
+		self.assertEqual((breakpoint.module, breakpoint.hits), (LIB, 1))
+
 	def test_a_disabled_pending_breakpoint_stays_disabled(self):
+		self.ida.places_by_file_name = False
 		breakpoint = debugger.Breakpoint.add(0x40, module='libengine.dylib')
 		breakpoint.enabled = False
 		self.start([('load', LIB, LIB_BASE, 0x10000), ('exec', 1, LIB_BASE + 0x40), ('exit', 0)])
