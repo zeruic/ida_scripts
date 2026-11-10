@@ -17,7 +17,7 @@ Never run Python with `-W error`: idalib crashes when `DeprecationWarning` is an
 
 `tests/harness.py` gives each test process its own temporary copy of a fixture's analysed database, so files run side by side and may change it. A test class sets `fixture` to pick one (default `sample`), and `fresh = True` when it changes the database, so the next class starts from an unchanged copy. `harness.sym('compute')` is the address of a fixture symbol.
 
-Two tests look at the package as a whole. `test_api_names.py` fails when the package uses an IDAPython name that does not exist in the running IDA or is deprecated there. `test_outside_ida.py` checks that the package imports without IDA and that everything public has a docstring.
+Three tests look at the package as a whole. `test_api_names.py` fails when the package uses an IDAPython name that does not exist in the running IDA or is deprecated there. `test_outside_ida.py` checks that the package imports without IDA and that everything public has a docstring. `test_outside_skill.py` keeps the skill in `skills/ida-scripts` true to the code: its API reference has to be what `skills/ida-scripts/scripts/api_reference.py` writes now, and the names and arguments its examples use have to exist.
 
 ## What has been verified, and where
 
