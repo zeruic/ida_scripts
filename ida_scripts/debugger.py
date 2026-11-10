@@ -24,7 +24,7 @@ from typing import *
 from . import compat
 from .compat import IN_IDA
 from .utils import *
-from .memory import Pointer
+from .memory import Pointer, Insn
 from .module import Module, file_name, same_module
 
 if TYPE_CHECKING:
@@ -127,6 +127,33 @@ def same_event(event: Event, kind: str, reported: 'ida_idd.debug_event_t') -> bo
 	if event.kind != kind and not (event.kind in stops and kind in stops):
 		return False
 	return kind == 'process_exit' or event.tid == reported.tid
+
+def call_site(ea: int) -> int:
+	''' The call instruction that a caller's entry in IDA's stack trace stands for.
+
+	IDA guesses a caller's call backwards from the return address. It was seen to give the return address itself (for every caller, while the innermost function has not set up its frame), and an address inside the instruction before the call. Where the database has the caller's instructions, they tell which call it is. Anywhere else the entry stays as IDA gave it.
+	'''
+	head = ida_bytes.get_item_head(ea)
+	if not ida_bytes.is_code(ida_bytes.get_flags(head)):
+		return ea
+	if head != ea:
+		# Inside an instruction: the call is the one behind it.
+		after = head + ida_bytes.get_item_size(head)
+		return after if is_call(after) else ea
+	if is_call(ea):
+		return ea
+	# Not a call, so not a call site. Behind a call it is that call's return address.
+	before = ida_bytes.prev_head(ea, 0)
+	if before != compat.BADADDR and is_call(before) and before + ida_bytes.get_item_size(before) == ea:
+		return before
+	return ea
+
+def is_call(ea: int) -> bool:
+	''' Whether the database has a call instruction at `ea`. '''
+	try:
+		return ida_bytes.is_code(ida_bytes.get_flags(ea)) and Insn(ea).is_call
+	except IDAError:
+		return False
 
 def default_debugger() -> Optional[str]:
 	''' IDA's local debugger for the database's file type: `'win32'`, `'linux'`, `'mac'` or `'arm_mac'`. `None` when there is none. '''
@@ -446,14 +473,18 @@ class Debugger:
 		return values
 
 	def stack(self, depth: int = 16) -> List[Pointer]:
-		''' The call stack of `Debugger.thread`, innermost first: the current address, then the call site in each caller. At most `depth` entries. '''
+		''' The call stack of `Debugger.thread`, innermost first: the current address, then the call instruction in each caller. At most `depth` entries.
+
+		A caller whose code the database does not have (a system library, say) is where IDA guesses its call to be, which can be the return address instead.
+		'''
 		self._need_suspended('reading the call stack')
 		tid = self.thread
 		self._select()
 		trace = ida_idd.call_stack_t()
 		if not ida_dbg.collect_stack_trace(tid, trace):
 			raise DebuggerError(f'cannot collect the call stack of thread {tid}')
-		return [Pointer(frame.callea) for frame in trace][:depth]
+		frames = [frame.callea for frame in trace][:depth]
+		return [Pointer(ea if n == 0 else call_site(ea)) for n, ea in enumerate(frames)]
 
 	# CALLS
 	def call(self, target: Union[int, str, Pointer, 'Func'], prototype: str, *args) -> Any:

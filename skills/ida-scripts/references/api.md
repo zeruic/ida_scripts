@@ -352,7 +352,7 @@ Provides class(es) for driving the debugger: the process, breakpoints, registers
 - `detach() -> bool` Detach from the process and let it run on. Returns whether the debugger let go of it. Raises `DebuggerError` when there is no process.
 - `reg(name: str, value: int = None) -> Union[int, float, bytes, bool]` Read/Write a register of `Debugger.thread`.
 - `regs(*names) -> Dict[str, int]` Read several registers of `Debugger.thread` at once. Without names, every integer register the debugger can read.
-- `stack(depth: int = 16) -> List[Pointer]` The call stack of `Debugger.thread`, innermost first: the current address, then the call site in each caller. At most `depth` entries.
+- `stack(depth: int = 16) -> List[Pointer]` The call stack of `Debugger.thread`, innermost first: the current address, then the call instruction in each caller. At most `depth` entries.
 - `call(target: Address, prototype: str, *args) -> Any` Call a function in the suspended process, on `Debugger.thread`, and return its result.
 - `ref(value: Any = 0) -> Any` A by-reference argument for `Debugger.call`: the callee gets a pointer to a copy of `value`. Read `.value` afterwards for what it wrote there.
 - `wide(text: str) -> bytes` A UTF-16 string argument for `Debugger.call`, with its terminator.
