@@ -96,15 +96,22 @@ class TestDecompile(harness.IDATestCase):
 		self.assertTrue(compat.decompile(sym('hero'))[1])
 
 	def test_tree_needs_networkx(self):
+		import sys
+		# None in sys.modules makes the import fail, as it does where networkx is not installed.
+		with mock.patch.dict(sys.modules, { 'networkx' : None }):
+			with self.assertRaisesRegex(IDAError, 'networkx'):
+				Func('_compute').decompile().body
+		self.assertIn('add(', Func('_compute').decompile().pseudocode)
+
+	def test_tree_with_networkx(self):
 		try:
 			import networkx
 		except ImportError:
-			with self.assertRaisesRegex(IDAError, 'networkx'):
-				Func('_compute').decompile().body
-		else:
-			cfunc = Func('_compute').decompile()
-			self.assertGreater(len(cfunc.body), 0)
-			self.assertEqual(cfunc.body_root.op, 'block')
+			self.skipTest('networkx is not installed')
+		cfunc = Func('_compute').decompile()
+		self.assertIsInstance(cfunc.body, networkx.DiGraph)
+		self.assertGreater(len(cfunc.body), 0)
+		self.assertEqual(cfunc.body_root.op, 'block')
 
 	def test_comment(self):
 		f = Func('_leaf')

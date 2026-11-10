@@ -6,6 +6,7 @@
 
 - **IDA 9.x with idalib**, and a Python that can `import idapro`. The runner uses `IDA_PYTHON` when it is set. Otherwise it looks for the virtual environment in IDA's user folder (`~/.idapro/venv` on macOS and Linux, `%APPDATA%\Hex-Rays\IDA Pro\venv` on Windows), and then tries the Python that runs it. That Python has to be the version IDA is set up for (`idapyswitch`).
 - **The ARM64 decompiler.** The fixtures are small arm64 Mach-O programs, on every system.
+- **`networkx` is optional.** `CFunc.body` needs it (`pip install networkx` into IDA's Python). The tree tests run on it when it is installed, and on a small stand-in in `tests/fakes` either way.
 - **No compiler, except on macOS and for the live debugger test.** macOS compiles the fixtures from `tests/fixtures/*.c` with clang. Other systems use the copies in `tests/fixtures/bin`. After changing a fixture, run `python tests/run.py --prebuild` on macOS and commit the new copies.
 
 About once a minute, for a second or so, idalib opened a database without its root information here (no input file name, image base 0), with an IDA MCP server running on the machine. `Database.open` notices and opens it again.
@@ -27,7 +28,7 @@ Two tests look at the package as a whole. `test_api_names.py` fails when the pac
 | `debugger`, `module` | A fake of `ida_dbg` and `ida_idd`, kept in step with the real 9.4 names and signatures by a test |
 | `debugger`, `module` on a real process | **Nothing yet.** macOS refuses to let IDA debug without elevated permissions, so `test_debugger_live.py` skips there with IDA's message |
 | x86 and x64 code, PE and ELF files, IDA 9.0 to 9.3, Windows and Linux hosts | Nothing yet |
-| The decompiler tree (`CFunc.body`, `CItem`) | A small stand-in for `networkx`, which was not installed |
+| The decompiler tree (`CFunc.body`, `CItem`) | `networkx` 3.7, and the small stand-in the tests fall back to. Also end to end: an access into a struct's gap, found in the tree, becomes a member |
 
 ## The live debugger test
 

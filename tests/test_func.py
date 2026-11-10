@@ -20,19 +20,33 @@ import ida_ua
 
 FAKES = os.path.join(harness.TESTS, 'fakes')
 
-def load_networkx():
-	''' The real `networkx` when it is installed, else the stand-in in tests/fakes, which is on `sys.path` only while it is imported. '''
-	try:
-		import networkx
-		return networkx
-	except ImportError:
-		pass
+def load_networkx(stand_in: bool = False):
+	''' The real `networkx` when it is installed, else the stand-in in tests/fakes, which is on `sys.path` only while it is imported.
+
+	`stand_in` takes the stand-in even when the real one is installed. `unload_networkx` puts the real one back.
+	'''
+	if not stand_in:
+		try:
+			import networkx
+			return networkx
+		except ImportError:
+			pass
+	real = { name : module for name, module in sys.modules.items() if name == 'networkx' or name.startswith('networkx.') }
+	for name in real:
+		del sys.modules[name]
 	sys.path.insert(0, FAKES)
 	try:
 		import networkx
 	finally:
 		sys.path.remove(FAKES)
+	networkx.replaced = real
 	return networkx
+
+def unload_networkx(networkx):
+	''' Take the stand-in out again, and put back the real modules it replaced. '''
+	if networkx.__file__.startswith(FAKES):
+		del sys.modules['networkx']
+		sys.modules.update(networkx.replaced)
 
 def names(funcs):
 	return [f.name for f in funcs]
@@ -470,17 +484,58 @@ class TestMatchAcrossBuilds(harness.IDATestCase):
 		self.assertEqual(names(Func('_compute').callees), ['_plus', '_mul', '_leaf'])
 
 class TestTree(harness.IDATestCase):
+	''' The tree of a decompiled function, on the real `networkx` when it is installed. '''
+
+	stand_in = False
 
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.networkx = load_networkx()
+		cls.networkx = load_networkx(cls.stand_in)
 		cls.fake = cls.networkx.__file__.startswith(FAKES)
 
 	@classmethod
 	def tearDownClass(cls):
-		if cls.fake:
-			del sys.modules['networkx']
+		unload_networkx(cls.networkx)
+
+	def test_the_package_in_use(self):
+		import networkx
+		self.assertIs(networkx, self.networkx)
+		self.assertIs(func.networkx(), self.networkx)
+		if self.stand_in:
+			self.assertTrue(self.fake)
+
+	def test_every_function_gives_a_tree(self):
+		for function in Func.all():
+			if function.is_thunk:
+				continue
+			with self.subTest(function.name):
+				cfunc = function.decompile()
+				body, root = cfunc.body, cfunc.body_root
+				self.assertEqual(root.op, 'block')
+				self.assertIsNone(root.parent)
+				items = list(body)
+				self.assertEqual(len(items), len(set(item.id for item in items)))
+				for item in items:
+					if item != root:
+						self.assertEqual(len(list(body.predecessors(item))), 1, item)
+						self.assertIn(item, item.parent.children)
+				reached = root.children_where(lambda item: True)
+				self.assertEqual(len(reached), len(items))
+				self.assertEqual(reached[0], root)
+				self.assertEqual(sum(item.n_children for item in items), len(items) - 1)
+				if not self.fake:
+					self.assertTrue(self.networkx.is_arborescence(body))
+					self.assertEqual(body.number_of_edges(), len(items) - 1)
+
+	def test_switch_and_calls_in_a_larger_function(self):
+		root = Func('_dispatch').decompile().body_root
+		self.assertEqual(len(root.children_where(lambda item: item.op == 'switch')), 1)
+		calls = root.children_where(lambda item: item.op == 'call')
+		self.assertEqual(sorted(call.called_function.name for call in calls), ['_add', '_mul'])
+		returns = root.children_where(lambda item: item.op == 'return')
+		inside = [item for item in returns if item.parent_where(lambda parent: parent.op == 'switch')]
+		self.assertGreaterEqual(len(inside), 2)
 
 	def setUp(self):
 		self.cfunc = Func('_compute').decompile()
@@ -510,7 +565,8 @@ class TestTree(harness.IDATestCase):
 		self.assertEqual(first.parent.op, 'asg')
 		self.assertEqual(first.parent_where(lambda item: item.op == 'expr').op, 'expr')
 		self.assertEqual(first.parent_expression, first.parent.parent)
-		self.assertEqual(first.children[0].label, 'obj//.-1 _add//__int64 (__fastcall *)(_QWORD, __int64)')
+		# The argument types depend on whether _add itself was decompiled before.
+		self.assertTrue(first.children[0].label.startswith('obj//.-1 _add//__int64 (__fastcall *)('), first.children[0].label)
 		self.assertIsNone(self.root.child_where(lambda item: item.op == 'memptr'))
 		self.assertIsNone(self.root.type_name)
 		self.assertIn('op=call', repr(first))
@@ -548,6 +604,11 @@ class TestTree(harness.IDATestCase):
 				self.assertTrue(hasattr(CFunc, attribute))
 			elif attribute in ('subtree_search_strict', 'child_where', 'called_function', 'accessed_struct', 'accessed_struct_member', 'parent_where', 'parent', 'type_name', 'num_value', 'op'):
 				self.assertTrue(hasattr(CItem, attribute), attribute)
+
+class TestTreeStandIn(TestTree):
+	''' The same tests on the stand-in, which is what the tests use where `networkx` is not installed. '''
+
+	stand_in = True
 
 class FakeStruct:
 	''' Stands in for `StrucT`, whose port is not this module's. '''
@@ -598,6 +659,54 @@ class TestStructAccess(harness.IDATestCase):
 		members = Func('_player_power').decompile().body_root.children_where(lambda item: item.op == 'memptr')
 		self.assertEqual({ member.accessed_struct.name for member in members }, { 'Player' })
 		self.assertEqual(sorted(member.accessed_struct_member.name for member in members), ['inventory', 'level', 'score'])
+
+class TestGapWorkflow(harness.IDATestCase):
+	''' What applications/flowers does: find accesses into a struct's gap in the pseudocode tree, and turn them into members. '''
+
+	fresh = True
+
+	GAPPED = '''
+		struct Vec2 { float x; float y; };
+		struct GappedPlayer { int id; short level; unsigned char flags; char name[16]; struct Vec2 position; double score; const char *title; _BYTE gap30[16]; struct GappedPlayer *next; };
+	'''
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.networkx = load_networkx()
+
+	@classmethod
+	def tearDownClass(cls):
+		unload_networkx(cls.networkx)
+
+	def test_a_gap_access_becomes_a_member(self):
+		from ida_scripts.struc import StrucT
+		struct = StrucT.parse(self.GAPPED)[-1]
+		self.assertEqual((struct.name, struct.size, struct['gap30'].offset, struct['gap30'].is_gap), ('GappedPlayer', 72, 48, True))
+		power = Func('_player_power')
+		power.prototype = 'int player_power(struct GappedPlayer *player)'
+		root = power.decompile().body_root
+		accesses = root.children_where(lambda item: item.op == 'memptr' and item.accessed_struct_member.is_gap)
+		self.assertEqual(len(accesses), 1, power.decompile().pseudocode)
+		access = accesses[0]
+		self.assertEqual(access.accessed_struct, struct)
+		self.assertEqual(access.accessed_struct_member, struct['gap30'])
+		self.assertEqual(access.parent.op, 'idx', access.parent.label)
+		index = access.parent.child_where(lambda item: item.op == 'num')
+		offset = access.accessed_struct_member.offset + index.num_value
+		self.assertEqual(offset, 52)
+		cast = access.parent_where(lambda item: item.op == 'cast')
+		self.assertIsNotNone(cast, power.decompile().pseudocode)
+		self.assertEqual(cast.parent.op, 'ptr')
+		self.assertIn(cast.parent.type_name, ('_DWORD', 'int'))
+		member = struct.add_member_auto('int item1', offset)
+		self.assertEqual((member.name, member.offset, member.size), ('item1', 52, 4))
+		layout = [(m.name, m.offset, m.size) for m in struct.members if m.offset >= 48]
+		self.assertEqual(layout, [('gap30', 48, 4), ('item1', 52, 4), ('gap38', 56, 8), ('next', 64, 8)])
+		self.assertEqual(struct.size, 72)
+		after = power.decompile()
+		self.assertIn('player->item1', after.pseudocode)
+		self.assertEqual(after.body_root.children_where(lambda item: item.op == 'memptr' and item.accessed_struct_member.is_gap), [])
 
 if __name__ == '__main__':
 	harness.main()
