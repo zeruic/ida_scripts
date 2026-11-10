@@ -315,12 +315,16 @@ class Debugger:
 		with self._headless():
 			code = ida_dbg.attach_process(pid, -1)
 			if code != 1:
-				reasons = { 0 : 'IDA did not attach (attach_process returned 0, a cancelled attach, and IDA\'s output says why)', -1 : 'the debugger could not attach (it died, or permission is missing)', -2 : 'there is no compatible process with that id', -3 : 'this debugger cannot attach', -4 : 'the debugger is not initialised' }
+				reasons = { 0 : 'IDA did not attach (attach_process returned 0, a cancelled attach, and IDA\'s output says why)', -1 : 'the debugger could not attach (there is no such process, or permission is missing)', -2 : 'there is no compatible process with that id', -3 : 'this debugger cannot attach', -4 : 'the debugger is not initialised' }
 				raise DebuggerError(f'{action}: {reasons.get(code, f"attach_process returned {code}")}{self._abandon()}')
 			try:
-				return self._wait(action, timeout)
+				event = self._wait(action, timeout)
 			except DebuggerError as error:
 				raise DebuggerError(f'{error}{self._abandon()}') from None
+		# No load events come for the modules that were loaded before.
+		for module in Module._listed():
+			self._modules.setdefault(module.addr, module)
+		return event
 
 	def wait(self, timeout: float = None) -> Event:
 		''' Wait until the running process is suspended or exits, and return the event. Returns the latest event at once when the process is suspended already.
@@ -687,8 +691,11 @@ def install_hooks(debugger: Debugger) -> 'ida_dbg.DBG_Hooks':
 
 	class Hooks(ida_dbg.DBG_Hooks):
 
+		told = None
+
 		def record(self, kind: str, pid: int, tid: int, ea: int, module: str = None, code: int = None, info: str = '', base: int = None, size: int = 0) -> Event:
 			event = Event(kind, pid, tid, ea, module, code, info)
+			self.told = event
 			try:
 				debugger._record(event, base, size, hit=kind == 'breakpoint' and info != 'run_to')
 			except Exception:
@@ -713,6 +720,9 @@ def install_hooks(debugger: Debugger) -> 'ida_dbg.DBG_Hooks':
 			self.record('process_exit', pid, tid, ea, code=exit_code)
 
 		def dbg_process_detach(self, pid, tid, ea):
+			# The win32 debugger reports the detach without a process: pid -1.
+			if pid <= 0 and debugger.event is not None:
+				pid = debugger.event.pid
 			self.record('process_exit', pid, tid, ea, info='detached')
 
 		def dbg_thread_start(self, pid, tid, ea):
@@ -731,11 +741,18 @@ def install_hooks(debugger: Debugger) -> 'ida_dbg.DBG_Hooks':
 			self.record('other', pid, tid, ea, info=info)
 
 		def dbg_exception(self, pid, tid, ea, exc_code, exc_can_cont, exc_ea, exc_info):
-			self.record('exception', pid, tid, ea, code=exc_code, info=exc_info)
+			# The code arrives as a signed int: 0xC0000005 as -1073741819.
+			self.record('exception', pid, tid, ea, code=exc_code & 0xFFFFFFFF, info=exc_info)
 			return 0
 
 		def dbg_suspend_process(self):
+			# IDA sends this behind the notification of every event that suspends the process (a breakpoint, the process start). It is an event of its own only when nothing else told of the suspension.
+			told, self.told = self.told, None
+			reported = ida_dbg.get_debug_event()
+			if told is not None and reported is not None and told.kind == EVENT_KINDS.get(reported.eid()) and told.tid == reported.tid:
+				return
 			self.record('suspended', *self.current())
+			self.told = None
 
 		def dbg_bpt(self, tid, bptea):
 			self.record('breakpoint', self.current()[0], tid, bptea)
@@ -944,7 +961,7 @@ class Breakpoint:
 
 	@property
 	def module(self) -> Optional[str]:
-		''' The module of a module-relative breakpoint, as IDA has it (the full path once the module has loaded). `None` for any other breakpoint. '''
+		''' The module of a module-relative breakpoint, as IDA has it: the name it was added with, or the module's full path when IDA could only place it by that. `None` for any other breakpoint. '''
 		bpt = self.bpt()
 		if bpt is not None and bpt.loc.type() == ida_dbg.BPLT_REL:
 			return bpt.loc.path()
