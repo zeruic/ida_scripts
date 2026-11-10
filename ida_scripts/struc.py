@@ -15,6 +15,8 @@ from typing import *
 from .memory import Pointer
 from .utils import *
 
+__all__ = ['MemberT', 'StrucT', 'StrucI', 'parse_declaration']
+
 @auto_repr(['id', 'name', 'dtype', 'offset', 'size'], { 'offset' : hex, 'id' : hex })
 class MemberT:
 	''' Represent a member of a struct type. '''

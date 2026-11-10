@@ -1,17 +1,20 @@
 # Keeping these allows us to use imports without the module name prefix,
 # while still getting the modules to be refreshed properly.
-from ida_scripts.memory import *
-from ida_scripts.module import *
-from ida_scripts.struc import *
-from ida_scripts.func import *
-from ida_scripts.misc import *
+from ida_scripts import *
 
-try:
-	import idaapi
-	idaapi.require('ida_scripts.utils')
-	idaapi.require('ida_scripts.memory')
-	idaapi.require('ida_scripts.module')
-	idaapi.require('ida_scripts.struc')
-	idaapi.require('ida_scripts.func')
-	idaapi.require('ida_scripts.misc')
-except: pass
+import sys
+import idaapi
+
+MODULES = ['compat', 'utils', 'memory', 'module', 'struc', 'func', 'misc', 'debugger', 'session']
+
+# A module that holds on to something in IDA (hooks, for instance) lets go of it in `_unload`.
+for name in reversed(MODULES):
+	unload = getattr(sys.modules.get(f'ida_scripts.{name}'), '_unload', None)
+	if unload:
+		unload()
+
+for name in MODULES:
+	idaapi.require(f'ida_scripts.{name}')
+idaapi.require('ida_scripts')
+
+from ida_scripts import *

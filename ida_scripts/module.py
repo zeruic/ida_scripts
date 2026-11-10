@@ -7,6 +7,8 @@ from typing import *
 
 from .utils import *
 
+__all__ = ['Module']
+
 @auto_repr(['name', 'addr'], { 'addr' : hex })
 class Module:
 	''' Represents a single module. '''
