@@ -49,6 +49,7 @@ class Pointer:
 	def __init__(self, addr: Union[int, str, 'Pointer', 'Func']):
 		''' Init with an address, a symbol name, or anything else that stands for an address. '''
 		self.addr: int = to_ea(addr)
+		''' The address. '''
 
 	# READ/WRITE
 	def read(self, size: int, offset: int = 0) -> bytes:
