@@ -5215,7 +5215,9 @@ Seconds to wait. <code>None</code> waits as long as it takes. <code>0</code> ret
     </div>
     <a class="headerlink" href="#Debugger.stack"></a>
     
-            <div class="docstring"><p>The call stack of <code><a href="#Debugger.thread">Debugger.thread</a></code>, innermost first: the current address, then the call site in each caller. At most <code>depth</code> entries.</p>
+            <div class="docstring"><p>The call stack of <code><a href="#Debugger.thread">Debugger.thread</a></code>, innermost first: the current address, then the call instruction in each caller. At most <code>depth</code> entries.</p>
+
+<p>A caller whose code the database does not have (a system library, say) is where IDA guesses its call to be, which can be the return address instead.</p>
 </div>
 
 
