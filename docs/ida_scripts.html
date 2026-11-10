@@ -60,6 +60,9 @@
                     <a class="function" href="#hexdump">hexdump</a>
             </li>
             <li>
+                    <a class="function" href="#jsonable">jsonable</a>
+            </li>
+            <li>
                     <a class="class" href="#Pointer">Pointer</a>
                             <ul class="memberlist">
                         <li>
@@ -1080,6 +1083,21 @@ ida_scripts    </h1>
     
 
                 </section>
+                <section id="jsonable">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">jsonable</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">value</span><span class="p">:</span> <span class="n">Any</span></span><span class="return-annotation">) -> <span class="n">Any</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#jsonable"></a>
+    
+            <div class="docstring"><p>Convert a value to something <code>json.dumps</code> accepts. Addresses held by objects become hex strings.</p>
+</div>
+
+
+                </section>
                 <section id="Pointer">
                     <div class="attr class">
             
@@ -1140,7 +1158,9 @@ These methods take an optional <code>value</code> parameter. They read and retur
     </div>
     <a class="headerlink" href="#Pointer.addr"></a>
     
-    
+            <div class="docstring"><p>The address.</p>
+</div>
+
 
                             </div>
                             <div id="Pointer.read" class="classattr">
