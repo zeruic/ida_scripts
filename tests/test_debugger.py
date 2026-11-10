@@ -320,9 +320,50 @@ class TestRun(FakeTestCase):
 		self.dbg.resume(timeout=2.5)
 		flags, wait_for = [c for c in self.ida.calls if c[0] == 'wait'][-1][1:]
 		self.assertTrue(flags & D.WFNE_USEC and flags & D.WFNE_SUSP and flags & D.WFNE_CONT)
-		self.assertTrue(2000000 < wait_for <= 2500000)
-		self.assertEqual(debugger.wait_time(None), (0, -1))
-		self.assertEqual(debugger.wait_time(time.monotonic() + 5000)[0], 0)
+		self.assertEqual(wait_for, 500000)
+		self.assertEqual(debugger.wait_time(None), (D.WFNE_USEC, 500000))
+		self.assertEqual(debugger.wait_time(time.monotonic() + 5000), (D.WFNE_USEC, 500000))
+		flags, wait_for = debugger.wait_time(time.monotonic() + 0.2)
+		self.assertTrue(flags == D.WFNE_USEC and 100000 < wait_for <= 200000)
+		self.assertEqual(debugger.wait_time(time.monotonic() - 1), (D.WFNE_USEC, 0))
+
+	def test_a_long_wait_is_made_of_slices(self):
+		# Observed: nothing reaches Python while IDA waits. An MCP server could not cut a call off until the wait was over.
+		self.start([('idle',), ('idle',), ('exec', 1, sym('compute'))])
+		debugger.Breakpoint.add('_compute')
+		with mock.patch.object(debugger, 'WAIT_SLICE', 0.01):
+			event = self.dbg.resume()
+		self.assertEqual((event.kind, event.address), ('breakpoint', sym('compute')))
+		waits = [c[1:] for c in self.ida.calls if c[0] == 'wait'][-3:]
+		self.assertEqual([wait_for for flags, wait_for in waits], [10000] * 3)
+		self.assertEqual([bool(flags & D.WFNE_CONT) for flags, wait_for in waits], [True, False, False])
+
+	def test_a_wait_in_slices_keeps_its_timeout(self):
+		self.start([('idle',), ('idle',), ('idle',), ('idle',), ('idle',), ('exec', 1, sym('compute'))])
+		debugger.Breakpoint.add('_compute')
+		with mock.patch.object(debugger, 'WAIT_SLICE', 0.01):
+			with self.assertRaisesRegex(DebuggerError, 'resuming: the process is still running after 0.025 s'):
+				self.dbg.resume(timeout=0.025)
+			self.assertEqual(self.dbg.state, 'running')
+			self.assertEqual(self.dbg.wait(timeout=1).kind, 'breakpoint')
+
+	def test_an_exit_between_slices_ends_the_wait(self):
+		self.start([('idle',), ('exit', 3)])
+		with mock.patch.object(debugger, 'WAIT_SLICE', 0.01):
+			event = self.dbg.resume()
+		self.assertEqual((event.kind, event.code), ('process_exit', 3))
+
+	def test_an_interrupted_wait_leaves_the_process_running(self):
+		def interrupt(fake):
+			raise KeyboardInterrupt
+		self.start([('idle',), ('call', interrupt), ('exec', 1, sym('compute'))])
+		debugger.Breakpoint.add('_compute')
+		with mock.patch.object(debugger, 'WAIT_SLICE', 0.01):
+			with self.assertRaises(KeyboardInterrupt):
+				self.dbg.resume()
+			self.assertEqual(self.dbg.state, 'running')
+			self.assertFalse(self.dbg._waiting)
+			self.assertEqual(self.dbg.wait().kind, 'breakpoint')
 
 	def test_run_to(self):
 		self.start([('exec', 1, sym('compute')), ('exec', 1, sym('leaf'))])

@@ -7,8 +7,9 @@ The process runs a `program`: a list of steps, taken one by one while it runs, e
 - `('thread', tid)`, `('thread_exit', tid, code)`: a thread starts or exits.
 - `('exception', tid, ea, code, info)`, `('info', text)`, `('exit', code)`.
 - `('call', function)`: runs `function(fake)`, as the program doing something, and produces no event.
+- `('idle',)`: nothing happens for the rest of the wait that gets here. The next wait goes on with the program.
 
-When the program runs out, the process runs forever: waits time out.
+When the program runs out, the process runs forever: waits time out. A wait that times out lasts its whole timeout, as IDA's does.
 
 The model follows IDA 9.4 as it was observed debugging a real process with the win32 debugger: which notifications come and in what order, what the events carry, how a module-relative breakpoint finds its module, and what the breakpoint calls return. Otherwise it follows the documentation of the stubs.
 
@@ -16,6 +17,7 @@ It is stricter than IDA in one thing: IDA selects the thread of an event and the
 '''
 
 import sys
+import time
 from unittest import mock
 
 from . import ida_dbg as D
@@ -183,7 +185,10 @@ class FakeIDA:
 				event._exit_code = -9
 				return event
 		while self.program:
-			event = self.execute(self.program.pop(0))
+			step = self.program.pop(0)
+			if step[0] == 'idle':
+				return None
+			event = self.execute(step)
 			if event is not None:
 				return event
 		return None
@@ -307,6 +312,10 @@ class FakeIDA:
 		while True:
 			event = self.next_event()
 			if event is None:
+				# Observed: IDA sits out the whole timeout while nothing happens, and nothing in Python runs meanwhile.
+				seconds = timeout / 1000000 if wfne & D.WFNE_USEC else timeout
+				if seconds > 0:
+					time.sleep(seconds)
 				return D.DEC_TIMEOUT
 			self.deliver(event)
 			# A hook may have continued the process (request_continue_process, run_requests): then it goes on.
