@@ -16,7 +16,6 @@ The calls wait for the process themselves, so they work the same in a headless s
 '''
 
 import contextlib
-import math
 import os
 import time
 import traceback
@@ -48,6 +47,9 @@ SUSPENDING = ('process_start', 'breakpoint', 'exception', 'suspended')
 
 SUSPEND_TIMEOUT = 5
 ''' Seconds `Debugger.suspend` and `Debugger.detach` wait for the process. '''
+
+WAIT_SLICE = 0.5
+''' Seconds one wait inside IDA lasts at most. Nothing reaches Python while IDA waits (not Ctrl-C, not the time limit of a host such as an MCP server), so a long wait is made of short ones. '''
 
 EVENT_KINDS = {}
 if IN_IDA:
@@ -575,15 +577,19 @@ class Debugger:
 		self.handler_error = None
 		self._waiting = True
 		try:
+			self._since = []
 			while True:
-				self._since = []
 				extra, wait_for = wait_time(deadline)
 				code = ida_dbg.wait_for_next_event(flags | extra | ida_dbg.WFNE_SUSP | ida_dbg.WFNE_SILENT, wait_for)
 				if code == ida_dbg.DEC_TIMEOUT:
 					if compat.debugger_suspended():
 						event = self.event or self._current_event()
 						break
-					raise DebuggerError(f'{action}: the process is still running after {timeout} s')
+					if deadline is not None and time.monotonic() >= deadline:
+						raise DebuggerError(f'{action}: the process is still running after {timeout} s')
+					# Only a slice of the wait is over (see WAIT_SLICE). The process runs, so the next slice has nothing to continue.
+					flags &= ~ida_dbg.WFNE_CONT
+					continue
 				if code == ida_dbg.DEC_NOTASK:
 					event = next((e for e in reversed(self._since) if e.kind == 'process_exit'), None)
 					if event is None:
@@ -598,6 +604,7 @@ class Debugger:
 					ida_dbg.wait_for_next_event(ida_dbg.WFNE_CONT | ida_dbg.WFNE_NOWAIT | ida_dbg.WFNE_SILENT, 0)
 					raise DebuggerError(f'{action}: the process is still running after {timeout} s (breakpoint handlers kept it going)')
 				flags = ida_dbg.WFNE_CONT
+				self._since = []
 		finally:
 			self._waiting = False
 		if event.kind != 'process_exit' and compat.debugger_suspended():
@@ -678,12 +685,8 @@ class Debugger:
 			return True
 
 def wait_time(deadline: Optional[float]) -> Tuple[int, int]:
-	''' The extra `WFNE_` flag and the timeout for one `wait_for_next_event` call that must end by `deadline` (`None`: no limit). '''
-	if deadline is None:
-		return 0, -1
-	remaining = max(0.0, deadline - time.monotonic())
-	if remaining > 1000:
-		return 0, math.ceil(remaining)
+	''' The extra `WFNE_` flag and the timeout for one `wait_for_next_event` call: a slice of a wait that ends by `deadline` (`None`: no limit), `WAIT_SLICE` seconds at most. '''
+	remaining = WAIT_SLICE if deadline is None else min(WAIT_SLICE, max(0.0, deadline - time.monotonic()))
 	return ida_dbg.WFNE_USEC, int(remaining * 1000000)
 
 def install_hooks(debugger: Debugger) -> 'ida_dbg.DBG_Hooks':
