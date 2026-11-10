@@ -112,6 +112,9 @@ class TestDecompile(harness.IDATestCase):
 		f.comment = 'returns the counter'
 		self.assertEqual(f.comment, 'returns the counter')
 		self.assertEqual(compat.func_comment(f.start, True), 'returns the counter')
+		self.assertIn('returns the counter', f.decompile().pseudocode)
+		f.comment = 'changed'
+		self.assertIn('changed', f.decompile().pseudocode)
 		f.comment = ''
 		self.assertEqual(f.comment, '')
 
