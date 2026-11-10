@@ -688,13 +688,34 @@ class TestRegisters(FakeTestCase):
 
 	def test_stack(self):
 		self.stopped_at('compute')
-		self.ida.threads[1].frames = [(sym('compute'), sym('compute')), (sym('main') + 0x20, sym('main'))]
-		self.assertEqual(self.dbg.stack(), [sym('compute'), sym('main') + 0x20])
+		site = Func(sym('main')).calls[0].site
+		self.ida.threads[1].frames = [(sym('compute'), sym('compute')), (site, sym('main'))]
+		self.assertEqual(self.dbg.stack(), [sym('compute'), site])
 		self.assertEqual(self.dbg.stack(depth=1), [sym('compute')])
 		self.assertTrue(all(isinstance(entry, Pointer) for entry in self.dbg.stack()))
 		self.ida.threads[1].frames = []
 		with self.assertRaisesRegex(DebuggerError, 'cannot collect the call stack of thread 1'):
 			self.dbg.stack()
+
+	def test_stack_names_the_call_in_each_caller(self):
+		# Observed: IDA gave the return address for every caller while the innermost function had not set up its frame, and once an address inside the instruction before the call.
+		self.stopped_at('compute')
+		site = next(call.site for call in Func(sym('main')).calls if not debugger.is_call(call.site + 4))
+		for given in (site, site + 4, site - 1, site - 3):
+			self.ida.threads[1].frames = [(sym('compute'), sym('compute')), (given, sym('main')), (given, sym('main'))]
+			self.assertEqual(self.dbg.stack(), [sym('compute'), site, site], f'IDA gave the call{given - site:+}')
+
+	def test_stack_keeps_what_the_database_cannot_tell(self):
+		self.stopped_at('compute')
+		main = Func(sym('main'))
+		site = next(call.site for call in main.calls if not debugger.is_call(call.site + 4))
+		plain = next(ea for ea in range(main.start + 4, main.end, 4) if not debugger.is_call(ea) and not debugger.is_call(ea - 4) and not debugger.is_call(ea + 4))
+		for given in (plain, plain + 1, LIB_BASE + 0x124, LIB_BASE + 0x125):
+			self.ida.threads[1].frames = [(sym('compute'), sym('compute')), (given, sym('main'))]
+			self.assertEqual(self.dbg.stack(), [sym('compute'), given])
+		# The innermost entry is where the thread is, whatever stands there.
+		self.ida.threads[1].frames = [(site + 4, sym('main'))]
+		self.assertEqual(self.dbg.stack(), [site + 4])
 
 class TestMemoryWhileDebugging(FakeTestCase):
 

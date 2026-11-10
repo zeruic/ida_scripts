@@ -74,6 +74,9 @@ class TestFunc(harness.IDATestCase):
 		arguments = Func('_main').arguments
 		self.assertEqual(list(arguments)[:2], ['argc', 'argv'])
 		self.assertTrue(Func('_main').tif.is_func())
+		# Observed: the types were empty, because they belonged to function details that were gone by then.
+		self.assertEqual((str(arguments['argc']), arguments['argc'].get_size()), ('int', 4))
+		self.assertTrue(arguments['argv'].is_ptr())
 
 class TestDecompile(harness.IDATestCase):
 
