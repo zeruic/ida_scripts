@@ -23,25 +23,30 @@ Two tests look at the package as a whole. `test_api_names.py` fails when the pac
 
 | Area | Verified against |
 |---|---|
-| `memory`, `func`, `misc`, `struc`, `session`, `load.py` | IDA 9.4 on macOS, arm64 Mach-O fixtures, database only |
-| Reads and writes of a debugged process (`Pointer`, `StrucI`) | A fake process |
-| `debugger`, `module` | A fake of `ida_dbg` and `ida_idd`, kept in step with the real 9.4 names and signatures by a test |
-| `debugger`, `module` on a real process | **Nothing yet.** macOS refuses to let IDA debug without elevated permissions, so `test_debugger_live.py` skips there with IDA's message |
-| x86 and x64 code, PE and ELF files, IDA 9.0 to 9.3, Windows and Linux hosts | Nothing yet |
+| `memory`, `func`, `misc`, `struc`, `session`, `load.py` | IDA 9.4 on macOS and on Windows, arm64 Mach-O fixtures, database only |
+| Reads and writes of a debugged process (`Pointer`, `StrucI`) | A fake process. `Pointer` also on a real one, in the live test |
+| `debugger`, `module` | A fake of `ida_dbg` and `ida_idd`, kept in step with the real 9.4 names and signatures by a test, and behaving the way the win32 debugger was seen to |
+| `debugger`, `module` on a real process | IDA 9.4 on Windows 11: the win32 debugger on an x64 program built with MSVC, through idalib (`test_debugger_live.py`), and once by hand inside IDA (`idat`). macOS refuses to let IDA debug without elevated permissions, so the test skips there with IDA's message |
+| The Linux and macOS debuggers, x86 code, ELF files, IDA 9.0 to 9.3 | Nothing yet. Of x64 PE files, only what the live test touches |
 | The decompiler tree (`CFunc.body`, `CItem`) | `networkx` 3.7, and the small stand-in the tests fall back to. Also end to end: an access into a struct's gap, found in the tree, becomes a member |
 
 ## The live debugger test
 
-`python tests/run.py debugger_live` builds `tests/fixtures/live/debug_target.c` with the first C compiler on `PATH` (`cl`, `clang` or `gcc` on Windows), opens a database of it, and debugs it in nine steps: start, a breakpoint by name, registers and the call stack, memory, a call into the process, a module-relative breakpoint, handlers, `run_to` and `stop`. Each step says what it attempted when it fails, and the steps after a failed one are skipped.
+`python tests/run.py debugger_live` builds `tests/fixtures/live/debug_target.c` with the first C compiler on `PATH` (`cl`, `clang` or `gcc` on Windows), opens a database of it, and debugs it in ten steps: start, a breakpoint by name, registers and the call stack, memory, a call into the process, a module-relative breakpoint, handlers, `run_to`, detach and attach, and `stop`. Each step says what it attempted when it fails, and the steps after a failed one are skipped.
 
-On Windows, `cl` is on `PATH` only in a Developer Command Prompt.
+On Windows, `cl` is on `PATH` only in a Developer Command Prompt (or after `vcvars64.bat`).
 
-The first run on a machine where debugging is allowed is the first real run of the debugger module. These are the things only that run can tell, most likely first:
+## What the win32 debugger does
 
-1. Whether `dbg.start` leaves the process suspended at its start (it asks IDA for a breakpoint at the process start), and whether the hooks see the start event before the wait returns.
-2. Whether IDA moves the database to the address the process is loaded at. Step 4 compares the database's address of `counter` with the address the target reports.
-3. How IDA matches the module name of a module-relative breakpoint. The module records such a breakpoint under the name given, and gives it the module's full path when that module loads.
-4. Whether a handler can let the process run on from inside the breakpoint notification, both during `dbg.resume` and when the process was resumed from IDA itself.
-5. `dbg.call` (IDA's Appcall), `dbg.stack`, `dbg.regs()` without names, `dbg.suspend` on a running process, `dbg.detach` and `dbg.attach`.
-6. How a suspended process reports itself. Windows suspends by breaking in a new thread, which can leave one extra event for the next `resume`. Step 7 allows for that, step 8 may need the same.
-7. Paths that contain spaces, and module paths in another form than given (case, short names). Matching falls back to the file name.
+Seen with small scripts against IDA 9.4's own `ida_dbg` while the live test was first made to pass. The fake in `tests/fakes` does the same, so the tests that run everywhere cover it. A first run with another debugger (Linux, macOS) should check these first.
+
+1. `dbg_suspend_process` comes behind the notification of every event that suspends the process: `dbg_bpt`, `dbg_run_to`, `dbg_process_start`, `dbg_process_attach`, `dbg_exception` and the step notifications. `ida_dbg.get_debug_event()` still describes that event. It does not come when a hook continued the process from inside the notification. Alone, with a `PROCESS_SUSPENDED` event, it is `suspend_process` taking effect. The module records one event either way.
+2. `dbg.start` leaves the process suspended before the system's loader has run. The start event has no address, and the executable is the only module until the process runs on.
+3. IDA moves the database to the address the process is loaded at.
+4. IDA places a module-relative breakpoint when its path is the module's full path as the debugger reports it, or just a file name, in any case. It does not place one whose path is spelled another way (a short `PROGRA~1` name, say): the module gives that one the reported path when the module loads.
+5. A handler can let the process run on from inside the breakpoint notification (`request_continue_process`, then `run_requests`), during `dbg.resume` and when something else runs the process.
+6. A suspended process reports itself in the thread that was running, and leaves no extra event for the next `resume`. An attach does come in a thread of its own, which exits when the process runs on. No load events come for the libraries the process already had.
+7. The exception notification has the code as a signed int (`0xC0000005` as `-1073741819`), the detach notification has no process id, and `attach_process` returns -1 for a process id that does not exist.
+8. `enable_bpt` with a location returns `True` (on macOS it returned `False` and did it all the same).
+9. Two breakpoints at one address, an absolute and a module-relative one, make IDA send `dbg_bpt` twice for one hit. The module records two events then. Nothing guards against it.
+10. Paths with spaces are fine.
