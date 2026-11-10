@@ -15,8 +15,8 @@ Nothing here keeps state in the conversation. The open database, its unsaved edi
 
 | Host | The process lives | Use it for |
 |---|---|---|
-| The IDA MCP's `execute_python` | From `open_database` until `close_database` | Interactive work, and every debugging session |
-| A script run with IDA's Python (idalib) | For one run of the script | Batch jobs, and anything that should be repeatable |
+| The IDA MCP's `execute_python` | From `open_database` until `close_database` | Interactive work, and debugging step by step |
+| A script run with IDA's Python (idalib) | For one run of the script | Batch jobs, a debugging run that goes the same way every time, and anything that should be repeatable |
 | IDA's GUI, `File > Script file` on `REPO/load.py` | As long as IDA is open | When the user works in IDA themself |
 
 ### Through the IDA MCP
@@ -39,7 +39,7 @@ From then on every `execute_python` call on that database runs in the same names
 - The value of the last expression comes back, and it has to be JSON. Library objects are not, so wrap what you return in `jsonable(...)`, which takes any nesting of objects, lists and dicts. `print(...)` works as well and shows each object's short form.
 - A call that raises, or that runs into its timeout (360 s unless you pass `timeout`), is cut off where it stands. The namespace survives, with whatever the call had assigned before that point.
 - The MCP's own `db` (an ida-domain database) and its `reference` tool are still there and mix freely with the library. Do not reuse the name `db`.
-- `close_database` saves the database and ends the process. Opening it again gives an empty namespace, so run the lines above again. That is also how to pick up an edit to the library itself: `load.py` cannot run inside an MCP worker.
+- `close_database` saves the database and ends the process, and a program being debugged dies with it. Opening the database again gives an empty namespace, so run the lines above again. That is also the sure way to pick up an edit to the library itself. `exec(open(os.path.join(repo, 'load.py')).read())` reloads it in place where the worker allows it (it did in an idalib worker on Windows and failed in an `idat` worker on macOS), and leaves a new `dbg` with no handlers.
 - Each database has its own process. Two open databases are two namespaces (pass `instance_id`), and data moves between them as JSON, through your reply or a file.
 
 ### In a script
@@ -56,11 +56,13 @@ with Database.open('/path/to/target.i64') as db:    # a binary works too, with a
 
 Run it with the Python that has idalib: `~/.idapro/venv/bin/python3`, on Windows `%APPDATA%\Hex-Rays\IDA Pro\venv\Scripts\python.exe`. Never pass `-W error`, which crashes idalib while it starts. A process hosts one database at a time, and a database that is open in IDA's GUI cannot be opened by a script at the same moment.
 
+The database of a binary is `<binary>.i64` beside it, written only by `db.save()`. A script that is killed leaves IDA's working files there instead (`.id0`, `.id1`, `.id2`, `.nam`, `.til`), and the next open carries on from them without a word, with whatever the dead run had changed. Delete them after a crash.
+
 ## What holds everywhere
 
 - **Anything that means an address** can be an `int`, a `'0x…'` string, a symbol name, a `Pointer` or a `Func`. So `func('update')`, `ptr('g_config')` and `Breakpoint.add('update')` all work without a lookup first.
 - **Addresses come back as `Pointer`** wherever one is handed to you (`ptr(...)`, `dbg.pc`, `event.address`, `StringRef.address`, an `Xref`'s `frm` and `to`). `.addr` is the `int`, `p + 8` is another `Pointer`, and a `Pointer` equals another `Pointer` or an `int` with the same address. `Func.start`, `Call.site` and `Module.addr` are plain ints. `references/api.md` gives the type of every property.
-- **Names are IDA's names.** A C symbol in a Mach-O file has a leading underscore (`_main`), a C++ one is mangled. A name the database lacks raises `LookupError`. When unsure of the spelling, search: `Func.search(r'main$')`, `search_names(r'config')`. `Func.find(name)` returns `None` instead of raising.
+- **Names are IDA's names.** A C symbol in a Mach-O file has a leading underscore (`_main`), a C++ one is mangled. A name the database lacks raises `LookupError`. When unsure of the spelling, search: `Func.search(r'main$')`, `search_names(r'config')` (`Pointer`s, each with its `.name`). `Func.find(name)` returns `None` instead of raising.
 - **Reads follow the debugger.** `Pointer` and struct reads come from the debugged process while there is one and from the database otherwise, so the same line works in both. Writes go to the process only.
 - **Errors say what was attempted.** They are `IDAError`, with `DecompileError` and `DebuggerError` as its kinds.
 - **Ask the library.** `help(Func.search)` in the session prints the full docstring, and what a call prints comes back with its result. `references/api.md` lists every public name with its signature and one line, and is the place to look before guessing a method.
@@ -138,14 +140,15 @@ event = dbg.resume(timeout=120)                       # runs until something sto
 jsonable({'event': event, 'pc': dbg.pc, 'stack': dbg.stack(8), 'seen': len(seen)})
 ```
 
-Four things carry most of the weight:
+Five things carry most of the weight:
 
-- **Run the process with a call that waits**: `dbg.resume`, `dbg.wait`, `dbg.run_to`. Each returns the `Event` that suspended the process. Give each a `timeout` shorter than the `execute_python` call's own. When nothing stopped the process in that time, the call raises a `DebuggerError` you can catch and the process keeps running, which beats a call cut off in the middle of its wait. `dbg.wait(timeout=…)` in a later call picks it up again, and `dbg.suspend()` stops it.
+- **Run the process with a call that waits**: `dbg.resume`, `dbg.wait`, `dbg.run_to`. Each returns the `Event` that suspended the process. Always give a `timeout`, shorter than the `execute_python` call's own: without one the call waits as long as the process runs. When nothing stopped the process in that time, the call raises a `DebuggerError` you can catch and the process keeps running, which beats a call cut off in the middle of its wait. `dbg.wait(timeout=…)` in a later call picks it up again, and `dbg.suspend()` stops it.
 - **A handler decides whether its breakpoint stops.** It is called as `handler(event)` with the process suspended. Returning something falsy lets the process run on, which is how to trace thousands of hits into a list without a round trip for each. Returning something truthy stops there. An exception in a handler stops too, and is kept in `dbg.handler_error`.
-- **Check `dbg.state` instead of assuming it** (`'none'`, `'running'`, `'suspended'`) at the start of a call that depends on it. The process may have exited, and registers, `dbg.pc` and `dbg.stack()` need it suspended.
-- **Starting or attaching takes hold of a real program on the user's machine.** Do it for the target they asked about, and end the session on purpose: `dbg.stop()` kills the process, `dbg.detach()` lets it live.
+- **The process lives on between your calls.** Through the MCP a running process keeps running after a call returns: breakpoints are hit, handlers run and can stop it, and events are recorded with no call of yours waiting. So a trace can be left to collect while you do something else, and a stop that happened meanwhile is simply there in the next call. Inside a call it is the reverse: the process gets past a breakpoint or a library load only while `dbg.resume`, `dbg.wait` or `dbg.run_to` is waiting, so wait with those and not with `time.sleep`.
+- **Check `dbg.state` instead of assuming it** (`'none'`, `'running'`, `'suspended'`) at the start of a call that depends on it. The process may have stopped or exited since the last call, and registers, `dbg.pc` and `dbg.stack()` need it suspended.
+- **Starting or attaching takes hold of a real program on the user's machine, and changes the database.** Do it for the target they asked about, and end the session on purpose: `dbg.stop()` kills the process, `dbg.detach()` lets it live, and `close_database` kills whatever is still attached. IDA moves the database to where the process is loaded and leaves it there afterwards, and the breakpoints you added stay in it too. `close_database` saves all of that. So before the first start, write a copy with `Database.current().save(path)` and tell the user where it is. `references/debugging.md` says how to put the database back afterwards, and what that does not undo.
 
-The debugger has run for real on Windows (IDA 9.4, the win32 debugger, x64). macOS refuses to let IDA debug without elevated permissions: `dbg.start` then raises with IDA's message, which is to be reported, not worked around.
+All of this has run for real on Windows (IDA 9.4, the win32 debugger, x64), in scripts and as sessions spread over many MCP calls. macOS refuses to let IDA debug without elevated permissions: `dbg.start` then raises with IDA's message, which is to be reported, not worked around.
 
 ## When the library does not cover it
 
