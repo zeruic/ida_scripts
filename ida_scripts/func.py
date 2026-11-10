@@ -1,24 +1,41 @@
-''' Provides class(es) for interacting with functions. '''
+''' Provides class(es) for interacting with functions.
 
-try:
-	import idautils
-	import ida_funcs
+The module itself can be called as a shorthand, like `ptr`: `func('main')` is `Func('main')`.
+'''
+
+import sys
+import types
+from typing import *
+
+from . import compat
+from .compat import IN_IDA
+from .utils import *
+from .memory import Pointer, set_name
+from .struc import *
+
+if IN_IDA:
 	import ida_name
-	import idaapi
+	import ida_nalt
+	import ida_typeinf
 	import ida_hexrays
 	import ida_lines
 	import ida_pro
-except: pass
-import networkx as nx
-from typing import *
-from .utils import *
-from .struc import *
+
+__all__ = ['Func', 'CFunc', 'CItem']
+
+def networkx():
+	''' The `networkx` module, needed only for the tree of a decompiled function. '''
+	try:
+		import networkx
+	except ImportError:
+		raise IDAError('the tree of a decompiled function needs the networkx package') from None
+	return networkx
 
 @auto_repr(['op', 'address'], { 'id' : hex, 'address' : hex })
 class CItem:
 	''' Represent an item inside a graph of a decompiled function. '''
 
-	def __init__(self, item: 'ida_hexrays.citem_t', graph: nx.DiGraph):
+	def __init__(self, item: 'ida_hexrays.citem_t', graph: 'networkx.DiGraph'):
 		''' Initialise with a `ida_hexrays.citem_t` object. '''
 		self.item = item
 		# python can handle retain cycles
@@ -56,9 +73,9 @@ class CItem:
 	def accessed_struct(self) -> StrucT:
 		''' Find and return the `StrucT` accessed by this memptr/memref operation. '''
 		assert self.op_id in [ida_hexrays.cot_memptr, ida_hexrays.cot_memref], 'Op is not memptr or memref.'
-		if self.op_id == idaapi.cot_memptr:
+		if self.op_id == ida_hexrays.cot_memptr:
 			struct_tinfo = self.item.cexpr.x.type.get_pointed_object()
-		elif self.op_id == idaapi.cot_memref:
+		elif self.op_id == ida_hexrays.cot_memref:
 			struct_tinfo = self.item.cexpr.x.type
 		return StrucT.find(str(struct_tinfo))
 
@@ -152,7 +169,7 @@ class CItem:
 
 	def child_where(self, condition: Callable[['CItem'], bool]) -> 'CItem':
 		''' Preorder dfs search for the first child meeting the condition. '''
-		dfs = nx.dfs_preorder_nodes(self.graph, self)
+		dfs = networkx().dfs_preorder_nodes(self.graph, self)
 		node = next(dfs)
 		while node:
 			if condition(node):
@@ -164,7 +181,7 @@ class CItem:
 
 	def children_where(self, condition: Callable[['CItem'], bool]) -> List['CItem']:
 		''' Preorder dfs search for all children meeting the condition. '''
-		dfs = nx.dfs_preorder_nodes(self.graph, self)
+		dfs = networkx().dfs_preorder_nodes(self.graph, self)
 		nodes = []
 		node = next(dfs)
 		while node:
@@ -177,6 +194,7 @@ class CItem:
 		return nodes
 
 	def parent_where(self, condition: Callable[['CItem'], bool]) -> 'CItem':
+		''' Walk up the parents for the first one meeting the condition. '''
 		parent = self.parent
 		while parent:
 			if condition(parent):
@@ -280,14 +298,14 @@ class CItem:
 	def __eq__(self, other: 'CItem'):
 		return hash(self) == hash(other)
 
-try:
+if IN_IDA:
 	class GraphBuilder(ida_hexrays.ctree_parentee_t):
 		''' Utility class used to build the decompiled items graph. '''
 
 		def __init__(self):
 			ida_hexrays.ctree_parentee_t.__init__(self)
-			self.graph = nx.DiGraph()
-		
+			self.graph = networkx().DiGraph()
+
 		def add_item(self, item: 'ida_hexrays.citem_t', type: str):
 			parent = self.parents.back()
 			item = CItem(item, self.graph)
@@ -301,7 +319,6 @@ try:
 
 		def visit_expr(self, e: 'ida_hexrays.cexpr_t'):
 			return self.add_item(e, 'expr')
-except: pass
 
 @auto_repr(['original'])
 class CFunc:
@@ -313,19 +330,30 @@ class CFunc:
 		''' The `Func` object from which this object is derived. '''
 		self.decompiled = decompiled
 		''' The decompiled `ida_hexrays.cfunc_t` object. '''
-		# build graph
-		gb = GraphBuilder()
-		gb.apply_to(decompiled.body, None)
-		self.body: nx.DiGraph = gb.graph
-		''' The graph representing the decompiled function. '''
-		self.body_root: CItem = next(nx.topological_sort(self.body))
-		''' The root node of the graph for this function. '''
-	
+		self.graph = None
+
 	@property
-	def psuedocode(self) -> str:
-		''' Psuedocode of the decompiled function. '''
+	def body(self) -> 'networkx.DiGraph':
+		''' The graph representing the decompiled function, each node a `CItem`. Built on first use, needs `networkx`. '''
+		if self.graph is None:
+			gb = GraphBuilder()
+			gb.apply_to(self.decompiled.body, None)
+			self.graph = gb.graph
+		return self.graph
+
+	@property
+	def body_root(self) -> CItem:
+		''' The root node of the graph for this function. '''
+		return next(networkx().topological_sort(self.body))
+
+	@property
+	def pseudocode(self) -> str:
+		''' Pseudocode of the decompiled function. '''
 		lines = self.decompiled.get_pseudocode()
 		return '\n'.join([ida_lines.tag_remove(l.line) for l in lines])
+
+	psuedocode = pseudocode
+	''' The old, misspelt name of `CFunc.pseudocode`. '''
 
 
 @auto_repr(['name', 'start', 'end', 'size'], { 'start' : hex, 'end' : hex, 'size' : hex})
@@ -333,59 +361,129 @@ class Func:
 	''' Represent a function. '''
 
 	@staticmethod
-	def find(name: str) -> 'Func':
+	def find(name: str) -> Optional['Func']:
 		''' Find function by name. '''
-		for addr in idautils.Functions():
-			if ida_name.get_ea_name(addr) == name:
-				func = idaapi.get_func(addr)
-				return Func(func) if func else None
+		ea = ida_name.get_name_ea(compat.BADADDR, name)
+		return Func(ea) if ea != compat.BADADDR and compat.func_start(ea) == ea else None
 
 	@staticmethod
-	def func_at(addr: Union[Pointer, int]) -> 'Func':
-		if type(addr) is Pointer:
-			addr = addr.addr
-		return Func(idaapi.get_func(addr))
+	def at(addr: Union[int, str, Pointer]) -> Optional['Func']:
+		''' The function containing an address, `None` when it is in no function. '''
+		start = compat.func_start(to_ea(addr))
+		return Func(start) if start is not None else None
 
-	def __init__(self, func: 'ida_funcs.func_t'):
-		''' Initialise with a `ida_funcs.func_t` object.'''
-		assert type(func) is ida_funcs.func_t, 'Invalid func!'
-		self.func = func
+	func_at = at
+	''' The old name of `Func.at`. '''
+
+	def __init__(self, target: Union[int, str, Pointer, 'Func']):
+		''' Initialise with any address inside the function, or its name. Raises `LookupError` when there is no function. '''
+		ea = target.start_ea if hasattr(target, 'start_ea') else to_ea(target)
+		start = compat.func_start(ea)
+		if start is None:
+			raise LookupError(f'no function at {hex(ea)}')
+		self.start: int = start
+		''' Function start address. '''
 
 	@property
 	def name(self) -> str:
-		''' Function name. '''
-		return ida_name.get_ea_name(self.func.start_ea)
+		''' Function name. Assign to rename. '''
+		return ida_name.get_name(self.start) or ''
 
-	@property
-	def start(self) -> int:
-		''' Function start address. '''
-		return self.func.start_ea
+	@name.setter
+	def name(self, name: str):
+		if not self.rename(name):
+			raise IDAError(f'cannot name {hex(self.start)} {name!r}')
+
+	def rename(self, name: str, force: bool = False) -> bool:
+		''' Rename the function. With `force`, IDA may use a numbered variant when the name is taken. '''
+		done = set_name(self.start, name, force)
+		if done:
+			compat.refresh_decompiler()
+		return done
 
 	@property
 	def end(self) -> int:
-		''' Function end address. '''
-		return self.func.end_ea
+		''' End address of the function's first chunk. '''
+		return compat.func_end(self.start)
 
 	@property
 	def size(self) -> int:
-		''' Function size. '''
-		return self.func.size()
+		''' Function size in bytes, all chunks together. '''
+		return compat.func_size(self.start)
 
 	@property
-	def tif(self) -> 'ida_typeinf.tinfo_t':
+	def chunks(self) -> List[Tuple[int, int]]:
+		''' Every chunk of the function as `(start, end)`, in address order. More than one when the function has tails. '''
+		return compat.func_chunks(self.start)
+
+	def contains(self, addr: Union[int, str, Pointer]) -> bool:
+		''' Whether an address lies in any chunk of this function. '''
+		ea = to_ea(addr)
+		return any(start <= ea < end for start, end in self.chunks)
+
+	@property
+	def tif(self) -> Optional['ida_typeinf.tinfo_t']:
+		''' Type of the function, `None` when it has none. '''
 		tif = ida_typeinf.tinfo_t()
-		return tif if idaapi.get_tinfo(tif, self.func.start_ea) else None
+		return tif if ida_nalt.get_tinfo(tif, self.start) else None
 
 	@property
 	def arguments(self) -> Dict[str, 'ida_typeinf.tinfo_t']:
 		''' Return a `dict` of argument name to type info. '''
-		func_data = idaapi.func_type_data_t()
-		self.tif.get_func_details(func_data)
+		tif = self.tif
+		func_data = ida_typeinf.func_type_data_t()
+		if not tif or not tif.get_func_details(func_data):
+			return {}
 		return { arg.name:arg.type for arg in func_data }
 
+	@property
+	def comment(self) -> str:
+		''' The function comment, repeated wherever the function is referenced. `''` when there is none. Assign to set it. '''
+		return compat.func_comment(self.start)
+
+	@comment.setter
+	def comment(self, text: str):
+		if not compat.set_func_comment(self.start, text):
+			raise IDAError(f'cannot comment {self.name or hex(self.start)}')
+
+	@property
+	def prototype(self) -> str:
+		''' The function's C prototype, `''` when it has no type. Assign a C declaration to set it. '''
+		return ida_typeinf.print_type(self.start, ida_typeinf.PRTYPE_1LINE) or ''
+
+	@prototype.setter
+	def prototype(self, declaration: str):
+		if not self.set_prototype(declaration):
+			raise IDAError(f'cannot apply {declaration!r} to {self.name or hex(self.start)}')
+
+	def set_prototype(self, declaration: str) -> bool:
+		''' Apply a C prototype such as `int __fastcall add(int a, int b)`. Returns whether IDA accepted it. '''
+		declaration = declaration.strip()
+		if not declaration.endswith(';'):
+			declaration += ';'
+		done = bool(ida_typeinf.apply_cdecl(None, self.start, declaration, ida_typeinf.TINFO_DEFINITE))
+		if done:
+			compat.refresh_decompiler()
+		return done
+
 	def decompile(self) -> CFunc:
-		''' Decompile this function. '''
-		err = ida_hexrays.hexrays_failure_t()
-		cfunc = ida_hexrays.decompile_func(self.func, err)
-		assert cfunc, f'Decompilation failed: {err}'
+		''' Decompile this function. Raises `DecompileError` when the decompiler fails. '''
+		cfunc, reason = compat.decompile(self.start)
+		if not cfunc:
+			raise DecompileError(f'cannot decompile {self.name or hex(self.start)}: {reason}')
 		return CFunc(self, cfunc)
+
+	def __hash__(self) -> int:
+		return self.start
+
+	def __eq__(self, o: object) -> bool:
+		return type(o) is Func and self.start == o.start
+
+class CallableModule(types.ModuleType):
+	''' Lets this module be called, so `func` names both the module and the shorthand without one hiding the other. '''
+
+	def __call__(self, target: Union[int, str, Pointer, Func]) -> Func:
+		''' Initialise a `Func`. '''
+		return Func(target)
+
+sys.modules[__name__].__class__ = CallableModule
