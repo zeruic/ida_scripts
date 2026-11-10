@@ -1,6 +1,7 @@
 ''' Provides class(es) for opening, saving and closing the database, so the same script runs headless and inside IDA. '''
 
 import os
+import time
 from typing import *
 
 from . import compat
@@ -13,6 +14,9 @@ if IN_IDA:
 	import ida_nalt
 
 __all__ = ['Database']
+
+OPEN_ATTEMPTS = 8
+''' How often `Database.open` opens a database that comes up without its root information, before it gives it out as it is. '''
 
 def same_file(a: str, b: str) -> bool:
 	return bool(a) and bool(b) and os.path.realpath(a) == os.path.realpath(b)
@@ -71,10 +75,17 @@ class Database:
 		if not os.path.exists(path):
 			raise IDAError(f'{path} does not exist')
 		import idapro
-		code = idapro.open_database(path, analyze)
-		if code != 0:
-			raise IDAError(f'cannot open {path} (idalib error {code})')
-		ida_auto.auto_wait()
+		for attempt in range(OPEN_ATTEMPTS):
+			code = idapro.open_database(path, analyze)
+			if code != 0:
+				raise IDAError(f'cannot open {path} (idalib error {code})')
+			ida_auto.auto_wait()
+			# Now and then idalib opens a database without its root information: no input file name, image base 0.
+			# Seen about once a minute for a second or so, with an IDA MCP server running. Opening again gets it.
+			if ida_nalt.get_root_filename() or attempt == OPEN_ATTEMPTS - 1:
+				break
+			idapro.close_database(False)
+			time.sleep(0.25)
 		return Database(True)
 
 	def __init__(self, owned: bool):
