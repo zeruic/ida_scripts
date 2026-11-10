@@ -1,18 +1,45 @@
-# iga_scripts
-This is a collection of IDA (V7) Python scripts, which hope to make IDAPython much more user-friendly and enjoyable :D.
+# ida_scripts
+This is a collection of IDA Python scripts, which hope to make IDAPython much more user-friendly and enjoyable :D.
+
+It works on **IDA 9.x** (tested on 9.4), with or without a debugger: inside IDA, in a headless script through idalib, or driven by an AI agent through an IDA MCP server.
 
 ## Features
 This is just an overview, please check the documentations below for the full set of features.
 - `memory`
-	- `Pointer`
-		- RW `bytes, int, pointer, string`
+	- `Pointer` (shorthand `ptr`), from an address or a symbol name
+		- RW `bytes, int, float, pointer, string, wide string, array`
+		- Reads the debugged process when there is one, the database otherwise
+		- Name, comment, segment, containing function and module
+		- Cross references to and from, as `Xref`
 		- Hex dump
-		- Arithmetics ( + - == )
+		- Arithmetics ( + - == < ), hashable
+	- `Insn` and `disasm(start, end)`
+- `func`
+	- `Func` (shorthand `func`)
+		- Find by name, address, or regex over all names
+		- Rename, comment, C prototype
+		- Callers, callees, and every call it makes (direct, tail or indirect)
+		- Strings and data it refers to, instructions, chunks
+		- Fingerprint, to find the same function in another build
+		- Decompile to yield `CFunc`
+	- `CFunc`
+		- Get pseudocode, without the local declarations, cut to a length, or with long identifiers shortened
+		- `grep` inside it, save it to a file
+		- Get body represented as a networkx.DiGraph (really just a tree)
+			- Each node is a `CItem`
+	- `CItem`
+		- Property accessors
+			- Customised convenient accessors such as
+				- Getting the struct / member being accessed
+				- Getting the number
+		- DFS search for node with lambda condition
+		- Subtree query for more complex searches
 - `struc`
 	- Types (the type defs, not instances)
 		- `StrucT`
 			- Find by name
-			- Get `id, name, members, size`
+			- Declare from C text or a header file
+			- Get `id, name, members, size, declaration`
 			- Subscript access for member `MemberT`
 			- Get `StrucI` instance from `Pointer`
 			- Create struct
@@ -23,38 +50,74 @@ This is just an overview, please check the documentations below for the full set
 	- Instance (instances with memory addresses)
 		- `StrucI`
 			- Get `members`
-			- Subscript access for member value
-- `func`
-	- `Func`
-		- Find by name, ea
-		- Property getters
-		- Decompile to yield `CFunc`
-	- `CFunc`
-		- Get psuedocode
-		- Get body represented as a networkx.DiGraph (really just a tree)
-			- Each node is a `CItem`
-	- `CItem`
-		- Property accessors
-			- Customised convenient accessors such as
-				- Getting the struct / member being accessed
-				- Getting the number 
-		- DFS search for node with lambda condition
-		- Subtree query for more complex searches
+			- Subscript access for member value, read and write
+	- Apply C prototypes to many functions
+- `debugger`
+	- `dbg`
+		- Start, attach, resume, run to, suspend, stop
+		- Every call waits until the process is suspended again and returns the `Event`
+		- Registers, program counter, stack pointer, call stack
+		- Call a function in the process
+		- Events recorded as they happen, handlers per kind of event
+	- `Breakpoint`
+		- By address, by name, or by offset into a module that has not loaded yet
+		- A handler per breakpoint, which can log and let the process run on
 - `module`
 	- `Module`
 		- Enumerate all modules
-		- Find module by name
+		- Find module by name, or by an address inside it
+		- Translate addresses between the process and the database
 - `misc`
-	- Find local variable in function frame (not working rn.)
-	- Find global symbol by name
-- All classes are pretty-printed when evaluated!
-
-### WIP
-- Modifying structs, automatically managing members and adjusting offsets.
-- More automation?
+	- Search names, comments and strings by regex
+	- Name and comment many addresses at once
+	- Export every annotation of a database, import it into another copy
+- `session`
+	- `Database`
+		- Open, save a snapshot, close, also as a context manager
+- All classes are pretty-printed when evaluated, and turn into JSON with `to_dict()`!
 
 ## Usage
-In IDA Pro, select `File > Script File` and choose the `load.py` script.
+In IDA Pro, select `File > Script File` and choose the `load.py` script. Run it again to reload the scripts after changing them.
+
+Anywhere else that has IDA's Python (idalib, or the Python of an IDA MCP server), put this folder on `sys.path` and import everything:
+
+```python
+from ida_scripts import *
+
+with Database.open('target.i64'):
+	f = func('main')
+	print(f.pseudocode(decls=False, max_lines=40))
+	print([caller.name for caller in f.callers])
+	print([(call.kind, call.text) for call in f.calls])
+	for found in Func.search(r'^Player::'):
+		print(found, found.strings)
+```
+
+While debugging:
+
+```python
+dbg.start('target.exe')                    # suspended at the process start
+Breakpoint.add('update')
+event = dbg.resume()                       # suspended at update, its thread selected
+print(dbg.regs('RCX', 'RDX'), dbg.stack())
+state = StrucT.find('GameState').instance_at(dbg.reg('RCX'))
+print(state['frame'], state.to_dict())
+
+seen = []
+Breakpoint.add(0x4de0, module='Engine.dll', handler=lambda event: seen.append(dbg.reg('RCX')))
+Breakpoint.add('shutdown')
+dbg.resume()                               # the handler returns None, so the process runs on to shutdown
+engine = Module.find('Engine.dll')
+print(len(seen), ptr(engine + 0x74e38).u32())
+dbg.stop()
+```
 
 ## Documentation
-[Documentation](https://zerui18.github.io/ida_scripts/ida_scripts.html) is auto-generated by PyDoc.
+[Documentation](https://zerui18.github.io/ida_scripts/ida_scripts.html) is auto-generated by pdoc:
+
+```
+IDA_SCRIPTS_NO_IDA=1 pdoc ida_scripts '!ida_scripts.utils' '!ida_scripts.compat' -d numpy --no-show-source -o docs
+```
+
+## Tests
+`python tests/run.py` runs everything against small fixture programs, see [tests/README.md](tests/README.md).
