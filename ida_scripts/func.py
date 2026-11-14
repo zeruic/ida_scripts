@@ -28,6 +28,7 @@ if IN_IDA:
 	import ida_funcs
 	import ida_bytes
 	import ida_ua
+	import ida_xref
 	import idautils
 
 __all__ = ['Func', 'CFunc', 'CItem', 'Call', 'export_fingerprints', 'match_functions', 'disasm']
@@ -661,15 +662,31 @@ class Func:
 		return dbg.call(self.start, prototype, *args)
 
 	# CODE
+	def _lone_jump(self) -> Optional[int]:
+		''' Where the function's only instruction jumps, when that is the start of another function. `None` for any other function. '''
+		try:
+			insn = Insn(self.start)
+		except IDAError:
+			return None
+		if insn.size != self.size or insn.is_call:
+			return None
+		kinds = { x.type for x in idautils.XrefsFrom(self.start, 0) }
+		target = insn.target
+		if ida_xref.fl_F in kinds or target is None or target.addr == self.start:
+			return None
+		return target.addr if compat.func_start(target.addr) == target.addr else None
+
 	@property
 	def is_thunk(self) -> bool:
-		''' Whether IDA marks this function as a thunk, a function that only jumps to another one, such as an import stub. '''
-		return bool(compat.func_flags(self.start) & ida_funcs.FUNC_THUNK)
+		''' Whether this function only jumps to another one: IDA marks it as a thunk, as it does an import stub, or it is a single jump to the start of another function. '''
+		return bool(compat.func_flags(self.start) & ida_funcs.FUNC_THUNK) or self._lone_jump() is not None
 
 	@property
 	def thunk_target(self) -> Optional['Func']:
 		''' The function a thunk jumps to. `None` when this is not a thunk, or when the target is in no function of the database, as for an import. '''
 		target = compat.thunk_target(self.start)
+		if target is None and not compat.func_flags(self.start) & ida_funcs.FUNC_THUNK:
+			target = self._lone_jump()
 		return Func.at(target) if target is not None else None
 
 	@property

@@ -80,6 +80,10 @@ class TestLookup(harness.IDATestCase):
 		self.assertIsNone(stub.thunk_target)
 		self.assertFalse(Func('_compute').is_thunk)
 		self.assertIsNone(Func('_compute').thunk_target)
+		# tail_caller ends in a jump to add, after other instructions.
+		self.assertFalse(Func('_tail_caller').is_thunk)
+		self.assertIsNone(Func('_tail_caller').thunk_target)
+		self.assertEqual({ f.name for f in Func.all() if f.is_thunk }, { '_printf', '_strlen' })
 
 class TestCalls(harness.IDATestCase):
 
@@ -181,8 +185,13 @@ class TestThunkTarget(harness.IDATestCase):
 
 	def test_thunk_to_a_function(self):
 		f = Func('_jump_to_times')
-		self.assertFalse(f.is_thunk)
-		self.assertIsNone(f.thunk_target)
+		# IDA does not mark the single jump as a thunk. It is one all the same.
+		self.assertFalse(compat.func_flags(f.start) & ida_funcs.FUNC_THUNK)
+		self.assertIsNone(compat.thunk_target(f.start))
+		self.assertEqual(len(f.insns), 1)
+		self.assertTrue(f.is_thunk)
+		self.assertEqual(f.thunk_target, Func('_times'))
+		self.assertEqual([g.name for g in Func.all() if g.is_thunk], ['_jump_to_times'])
 		self.assertTrue(ida_funcs.set_func_flag(f.start, ida_funcs.FUNC_THUNK, True))
 		self.assertTrue(f.is_thunk)
 		self.assertEqual(f.thunk_target, Func('_times'))

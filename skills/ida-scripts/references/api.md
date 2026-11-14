@@ -141,7 +141,7 @@ Provides class(es) for interacting with functions.
 - `pseudocode(**options) -> str` The decompiled function as text: `decompile().text(**options)`, see `CFunc.text` for the options. Raises `DecompileError` when the decompiler fails.
 - `disasm() -> str` The function's disassembly, one instruction per line after its address, every chunk in address order with a blank line between chunks.
 - `call(*args) -> Any` Call this function in the debugged process with its prototype, through `Debugger.call`, and return its result.
-- `is_thunk: bool` Whether IDA marks this function as a thunk, a function that only jumps to another one, such as an import stub.
+- `is_thunk: bool` Whether this function only jumps to another one: IDA marks it as a thunk, as it does an import stub, or it is a single jump to the start of another function.
 - `thunk_target: Func | None` The function a thunk jumps to. `None` when this is not a thunk, or when the target is in no function of the database, as for an import.
 - `insns: List[Insn]` Every instruction, all chunks in address order.
 - `fingerprint: str` SHA-256 (hex) of the sequence of mnemonics, all chunks in address order. It does not depend on addresses, so the same code has the same fingerprint in another build.
