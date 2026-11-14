@@ -1,9 +1,11 @@
-''' What makes a function quick to read: a window of its pseudocode, statements left out, its calls with their arguments, its outline, and a search over many functions. '''
+''' What makes a function quick to read: a window of its pseudocode, statements left out, its calls with their arguments, its outline, a search over many functions, and the list of callees to ignore that the database keeps. '''
 
 import contextlib
 import io
 import json
+import os
 import re
+import tempfile
 from unittest import mock
 
 import harness
@@ -11,7 +13,9 @@ from harness import sym
 from ida_scripts import compat
 from ida_scripts.memory import Pointer
 from ida_scripts import func
-from ida_scripts.func import Func, Call, hide_lines, code_part
+from ida_scripts.func import Func, Call, IgnoreSet, hide_lines, code_part
+from ida_scripts.session import Database
+import ida_netnode
 
 def printed(function, *args, **kwargs) -> str:
 	''' What a call prints. '''
@@ -330,6 +334,76 @@ class TestShowCode(harness.IDATestCase):
 			self.assertEqual(printed(func.show_code, '_add'), f'// {hex(add.start)} _add\n// cannot decompile _add: broken\n')
 		with self.assertRaises(LookupError):
 			func.show_code('no_such_function')
+
+class TestIgnoreKept(harness.IDATestCase):
+
+	fresh = True
+
+	def blob(self):
+		return ida_netnode.netnode(IgnoreSet.NODE, 0, False).getblob(0, IgnoreSet.TAG) if ida_netnode.netnode.exist(IgnoreSet.NODE) else None
+
+	def test_1_a_set_in_the_database(self):
+		self.assertIsInstance(Func.ignore, IgnoreSet)
+		self.assertEqual(Func.ignore, set())
+		self.assertEqual((len(Func.ignore), repr(Func.ignore), list(Func.ignore)), (0, 'set()', []))
+		self.assertIsNone(self.blob())
+		Func.ignore.update(['^_mul$', 'lea'])
+		self.assertEqual(Func.ignore, { '^_mul$', 'lea' })
+		self.assertIn('lea', Func.ignore)
+		self.assertNotIn('_add', Func.ignore)
+		self.assertEqual(list(Func.ignore), ['^_mul$', 'lea'])
+		self.assertEqual(json.loads(self.blob()), ['^_mul$', 'lea'])
+		self.assertEqual([call.text for call in Func('_compute').calls], ['_add', '_add'])
+		self.assertEqual([f.name for f in Func('_compute').callees], ['_add'])
+		# Another object reads the same set, because the database has it.
+		self.assertEqual(IgnoreSet(), { '^_mul$', 'lea' })
+		Func.ignore.discard('lea')
+		Func.ignore.discard('not there')
+		Func.ignore.add('^_leaf$')
+		self.assertEqual(sorted(Func.ignore), ['^_leaf$', '^_mul$'])
+		# One pattern, not its characters.
+		Func.ignore.update('^_add$')
+		self.assertEqual(sorted(Func.ignore), ['^_add$', '^_leaf$', '^_mul$'])
+		Func.ignore.remove('^_add$')
+		with self.assertRaises(KeyError):
+			Func.ignore.remove('^_add$')
+		Func.ignore.update(['a'], ('b',), { 'c' })
+		self.assertEqual(len(Func.ignore), 5)
+		Func.ignore.clear()
+		self.assertEqual(Func.ignore, set())
+		self.assertIsNone(self.blob())
+		Func.ignore.clear()
+
+	def test_2_only_regular_expressions(self):
+		with self.assertRaises(re.error):
+			Func.ignore.add('(')
+		with self.assertRaises(re.error):
+			Func.ignore.update(['fine', '('])
+		self.assertEqual(Func.ignore, set())
+
+	def test_3_a_plain_set_is_for_now(self):
+		with mock.patch.object(Func, 'ignore', { '^_mul$' }):
+			self.assertEqual([call.text for call in Func('_compute').calls], ['_add', '_leaf', '_add'])
+			self.assertEqual(IgnoreSet(), set())
+		self.assertIsInstance(Func.ignore, IgnoreSet)
+
+	def test_4_broken_data_is_no_data(self):
+		node = ida_netnode.netnode(IgnoreSet.NODE, 0, True)
+		node.setblob(b'not json', 0, IgnoreSet.TAG)
+		self.assertEqual(Func.ignore, set())
+		Func.ignore.add('x')
+		self.assertEqual(Func.ignore, { 'x' })
+		Func.ignore.clear()
+
+	def test_5_there_again_after_a_save(self):
+		Func.ignore.update(['^_mul$'])
+		folder = tempfile.mkdtemp(prefix='ida_scripts_test_')
+		copy = self.database.save(os.path.join(folder, 'kept.i64'))
+		Func.ignore.clear()
+		harness.close_fixture()
+		with Database.open(copy):
+			self.assertEqual(Func.ignore, { '^_mul$' })
+			self.assertEqual([call.text for call in Func('_compute').calls], ['_add', '_leaf', '_add'])
 
 if __name__ == '__main__':
 	harness.main()

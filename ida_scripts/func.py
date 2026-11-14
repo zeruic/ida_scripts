@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 if IN_IDA:
 	import ida_name
 	import ida_nalt
+	import ida_netnode
 	import ida_typeinf
 	import ida_hexrays
 	import ida_lines
@@ -676,6 +677,64 @@ def fingerprint_at(start: int) -> str:
 	mnemonics = ' '.join(ida_ua.print_insn_mnem(ea) or '' for ea in code_heads(compat.func_chunks(start)))
 	return hashlib.sha256(mnemonics.encode()).hexdigest()
 
+class IgnoreSet(collections.abc.MutableSet):
+	''' The set behind `Func.ignore`: regular expressions that the open database keeps, so they are there again the next time it is opened. '''
+
+	NODE = '$ ida_scripts ignore'
+	TAG = 'B'
+
+	def _load(self) -> Set[str]:
+		# Outside IDA there is no database, and so nothing in the set: the documentation tools print it there.
+		if not IN_IDA or not ida_netnode.netnode.exist(self.NODE):
+			return set()
+		data = ida_netnode.netnode(self.NODE, 0, False).getblob(0, self.TAG)
+		try:
+			return set(json.loads(data.decode('utf-8'))) if data else set()
+		except ValueError:
+			return set()
+
+	def _store(self, patterns: Set[str]):
+		if not IN_IDA:
+			raise IDAError('Func.ignore is kept in a database, and there is none outside IDA')
+		node = ida_netnode.netnode(self.NODE, 0, True)
+		if patterns:
+			node.setblob(json.dumps(sorted(patterns)).encode('utf-8'), 0, self.TAG)
+		else:
+			node.delblob(0, self.TAG)
+
+	def __contains__(self, pattern: object) -> bool:
+		return pattern in self._load()
+
+	def __iter__(self) -> Iterator[str]:
+		return iter(sorted(self._load()))
+
+	def __len__(self) -> int:
+		return len(self._load())
+
+	def add(self, pattern: str):
+		''' Add a regular expression. Raises `re.error` when it is not one. '''
+		self.update([pattern])
+
+	def discard(self, pattern: str):
+		''' Remove a regular expression, when it is there. '''
+		patterns = self._load()
+		if pattern in patterns:
+			self._store(patterns - { pattern })
+
+	def update(self, *others: Iterable[str]):
+		''' Add every regular expression of the given iterables. Raises `re.error`, and adds nothing, when one of them is none. '''
+		added = { pattern for other in others for pattern in ([other] if isinstance(other, str) else other) }
+		for pattern in added:
+			re.compile(pattern)
+		self._store(self._load() | added)
+
+	def clear(self):
+		''' Remove every regular expression. '''
+		self._store(set())
+
+	def __repr__(self) -> str:
+		return repr(self._load())
+
 @auto_repr(['name', 'start', 'end', 'size'], { 'start' : hex, 'end' : hex, 'size' : hex})
 class Func:
 	''' Represent a function. '''
@@ -721,8 +780,11 @@ class Func:
 		''' Every function, in address order. '''
 		return (Func(start) for start in compat.func_starts())
 
-	ignore: Set[str] = set()
-	''' Regular expressions of callee names that `Func.callees` and `Func.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default. '''
+	ignore: Set[str] = IgnoreSet()
+	''' Regular expressions of callee names that `Func.callees`, `Func.calls`, `Func.outline` and `CFunc.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default, and kept in the database when it is changed in place, as by `Func.ignore.update([r'^rt_'])`.
+
+	Changed in place (`add`, `update`, `discard`, `clear`), the set is there again after the database was saved and opened again. Assigning a plain `set` instead uses those patterns until the process ends, and stores nothing.
+	'''
 
 	def __init__(self, target: Union[int, str, Pointer, 'Func']):
 		''' Initialise with any address inside the function, or its name. Raises `LookupError` when there is no function. '''

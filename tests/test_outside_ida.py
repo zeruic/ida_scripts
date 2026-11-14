@@ -44,6 +44,14 @@ class TestOutsideIda(unittest.TestCase):
 		self.assertTrue(callable(ida_scripts.func))
 		self.assertTrue(inspect.ismodule(ida_scripts.func))
 
+	def test_the_ignore_list_without_a_database(self):
+		from ida_scripts.func import Func
+		from ida_scripts.utils import IDAError
+		self.assertEqual(Func.ignore, set())
+		self.assertEqual(repr(Func.ignore), 'set()')
+		with self.assertRaises(IDAError):
+			Func.ignore.add('x')
+
 	def test_pydoc_renders(self):
 		import pydoc
 		for name in MODULES:

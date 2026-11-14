@@ -118,7 +118,7 @@ Provides class(es) for interacting with functions.
 
 `Func(target: Address)` Represent a function.
 
-- `ignore: Set[str]` Regular expressions of callee names that `Func.callees` and `Func.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default.
+- `ignore: Set[str]` Regular expressions of callee names that `Func.callees`, `Func.calls`, `Func.outline` and `CFunc.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default, and kept in the database when it is changed in place, as by `Func.ignore.update([r'^rt_'])`.
 - `start: int` Function start address.
 - `Func.find(name: str) -> Func | None` Find function by name, `None` when there is none. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`.
 - `Func.at(addr: Address) -> Func | None` The function containing an address, `None` when it is in no function.
