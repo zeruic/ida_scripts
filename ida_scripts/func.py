@@ -103,7 +103,7 @@ class CItem:
 	def called_function(self) -> 'Func':
 		''' Find and return the `Func` called by this call operation. '''
 		assert self.op_id in [ida_hexrays.cot_call], 'Op is not call!'
-		return Func.func_at(self.item.x.obj_ea)
+		return Func.at(self.item.x.obj_ea)
 
 	@property
 	def num_value(self) -> int:
@@ -370,8 +370,6 @@ class CFunc:
 		''' Pseudocode of the decompiled function. '''
 		return '\n'.join(self.lines)
 
-	psuedocode = pseudocode
-	''' The old, misspelt name of `CFunc.pseudocode`. '''
 
 	def _declarations(self, lines: List[str]) -> range:
 		''' Where `lines`, just taken from `CFunc.lines`, declare the local variables: the lines after the opening brace, and the blank line after them. Empty when there are none. '''
@@ -509,9 +507,6 @@ class Func:
 		''' The function containing an address, `None` when it is in no function. '''
 		start = compat.func_start(to_ea(addr))
 		return Func(start) if start is not None else None
-
-	func_at = at
-	''' The old name of `Func.at`. '''
 
 	@staticmethod
 	def search(pattern: str, limit: int = None) -> List['Func']:

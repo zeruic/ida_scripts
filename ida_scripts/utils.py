@@ -1,5 +1,4 @@
 from typing import *
-import json
 import operator
 
 from . import compat
@@ -133,18 +132,3 @@ def hexdump(data, length = 16, sep = '.', start_offset = 0):
 def to_hex(n: int) -> str:
 	return hex(n)[2:].upper()
 
-def get_properties(obj: object) -> Dict[str, Any]:
-	attrs = {}
-	for attr in dir(obj):
-		try:
-			val = getattr(obj, attr)
-			if not callable(val):
-				attrs[attr] = val
-		except Exception as e:
-			attrs[attr] = f'[Failed] {e}'
-	return attrs
-
-def print_properties(obj: object):
-	print(json.dumps(get_properties(obj), indent=4, default=str))
-
-pp = print_properties

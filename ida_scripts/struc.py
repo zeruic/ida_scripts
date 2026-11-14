@@ -131,12 +131,6 @@ class StrucT:
 			raise IDAError(f'cannot create the struct {name!r}: {ida_typeinf.tinfo_errstr(code) if code is not None else "no empty struct"}')
 		return StrucT(tif.get_tid())
 
-	add_struc = create
-	''' The old name of `StrucT.create`. '''
-
-	create_struc = create
-	''' The old name of `StrucT.create`. '''
-
 	@staticmethod
 	def parse(declaration: str) -> List['StrucT']:
 		''' Declare types from C text, which may hold several declarations.

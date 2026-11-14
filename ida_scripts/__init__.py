@@ -8,7 +8,7 @@ __pdoc__ = {
 }
 
 from . import memory, module, struc, func, misc, debugger, session
-from .utils import IDAError, DecompileError, DebuggerError, pp, hexdump, jsonable
+from .utils import IDAError, DecompileError, DebuggerError, hexdump, jsonable
 from .memory import *
 from .module import *
 from .struc import *
@@ -17,6 +17,6 @@ from .misc import *
 from .debugger import *
 from .session import *
 
-__all__ = ['memory', 'module', 'struc', 'func', 'misc', 'debugger', 'session', 'IDAError', 'DecompileError', 'DebuggerError', 'pp', 'hexdump', 'jsonable']
+__all__ = ['memory', 'module', 'struc', 'func', 'misc', 'debugger', 'session', 'IDAError', 'DecompileError', 'DebuggerError', 'hexdump', 'jsonable']
 for _module in (memory, module, struc, func, misc, debugger, session):
 	__all__ += [name for name in _module.__all__ if name not in __all__]

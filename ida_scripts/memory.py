@@ -105,7 +105,7 @@ class Pointer:
 		return previous
 
 	# The following methods reads when `value` is None and writes otherwise.
-	def read_write_with_struct(self, format: str, value: Union[int, float] = None) -> Union[int, float, bool]:
+	def _read_write_with_struct(self, format: str, value: Union[int, float] = None) -> Union[int, float, bool]:
 		''' Read/Write a value described by one `struct` format character. '''
 		format = ('>' if compat.is_big_endian() else '<') + format
 		if value is None:
@@ -115,43 +115,43 @@ class Pointer:
 
 	def u8(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write uint8. '''
-		return self.read_write_with_struct('B', value)
+		return self._read_write_with_struct('B', value)
 
 	def u16(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write uint16. '''
-		return self.read_write_with_struct('H', value)
+		return self._read_write_with_struct('H', value)
 
 	def u32(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write uint32. '''
-		return self.read_write_with_struct('I', value)
+		return self._read_write_with_struct('I', value)
 
 	def u64(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write uint64. '''
-		return self.read_write_with_struct('Q', value)
+		return self._read_write_with_struct('Q', value)
 
 	def s8(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write int8. '''
-		return self.read_write_with_struct('b', value)
+		return self._read_write_with_struct('b', value)
 
 	def s16(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write int16. '''
-		return self.read_write_with_struct('h', value)
+		return self._read_write_with_struct('h', value)
 
 	def s32(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write int32. '''
-		return self.read_write_with_struct('i', value)
+		return self._read_write_with_struct('i', value)
 
 	def s64(self, value: int = None) -> Union[int, bool]:
 		''' Read/Write int64. '''
-		return self.read_write_with_struct('q', value)
+		return self._read_write_with_struct('q', value)
 
 	def f32(self, value: float = None) -> Union[float, bool]:
 		''' Read/Write a 32-bit float. '''
-		return self.read_write_with_struct('f', value)
+		return self._read_write_with_struct('f', value)
 
 	def f64(self, value: float = None) -> Union[float, bool]:
 		''' Read/Write a 64-bit float. '''
-		return self.read_write_with_struct('d', value)
+		return self._read_write_with_struct('d', value)
 
 	def array(self, format: str, count: int) -> List[Union[int, float]]:
 		''' Read `count` consecutive values.

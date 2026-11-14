@@ -43,7 +43,6 @@ Provides class(es) for reading and writing memory, of the database or of the deb
 - `read(size: int, offset: int = 0) -> bytes` Read bytes from `self.addr + offset` of given size.
 - `write(bytes: bytes, offset: int = 0, verify: bool = False) -> bool` Write bytes to `self.addr + offset` in the debugged process.
 - `swap(data: bytes, offset: int = 0) -> bytes` Write `data` to the debugged process and return the bytes it replaced.
-- `read_write_with_struct(format: str, value: Union[int, float] = None) -> Union[int, float, bool]` Read/Write a value described by one `struct` format character.
 - `u8(value: int = None) -> Union[int, bool]` Read/Write uint8.
 - `u16(value: int = None) -> Union[int, bool]` Read/Write uint16.
 - `u32(value: int = None) -> Union[int, bool]` Read/Write uint32.
@@ -119,7 +118,6 @@ Provides class(es) for interacting with functions.
 
 `Func(target: Address)` Represent a function.
 
-- `func_at` The old name of `Func.at`.
 - `ignore: Set[str]` Regular expressions of callee names that `Func.callees` and `Func.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default.
 - `start: int` Function start address.
 - `Func.find(name: str) -> Func | None` Find function by name, `None` when there is none. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`.
@@ -156,7 +154,6 @@ Provides class(es) for interacting with functions.
 
 `CFunc(original: Func, decompiled: cfunc_t)` Represent a decompiled function.
 
-- `psuedocode` The old, misspelt name of `CFunc.pseudocode`.
 - `original` The `Func` object from which this object is derived.
 - `decompiled` The decompiled `ida_hexrays.cfunc_t` object.
 - `body: DiGraph` The graph representing the decompiled function, each node a `CItem`. Built on first use, needs `networkx`.
@@ -251,8 +248,6 @@ Provides class(es) for interacting with structures (definition and instances in 
 
 `StrucT(target: Union[int, str, tinfo_t])` Represent a struct type, a struct or union of the database's local types.
 
-- `add_struc` The old name of `StrucT.create`.
-- `create_struc` The old name of `StrucT.create`.
 - `id: int` Struct id (its tid).
 - `StrucT.find(name: str) -> StrucT | None` Find struct type by name, `None` when there is none. `'struct Player'` works too, and a typedef name finds the struct it stands for.
 - `StrucT.create(name: str) -> StrucT` Create and return an empty struct. Raises `IDAError` when the name is taken or not acceptable.
@@ -400,6 +395,5 @@ The errors the package raises, and helpers for showing results.
 
 ### Functions and values
 
-- `pp(obj: object)`
 - `hexdump(data, length = 16, sep = '.', start_offset = 0)`
 - `jsonable(value: Any) -> Any` Convert a value to something `json.dumps` accepts. Addresses held by objects become hex strings.

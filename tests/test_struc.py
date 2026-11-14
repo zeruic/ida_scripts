@@ -208,8 +208,6 @@ class TestEdit(harness.IDATestCase):
 		s = StrucT.create('Fresh')
 		self.assertEqual((s.name, s.size, s.members), ('Fresh', 0, []))
 		self.assertEqual(StrucT.find('Fresh'), s)
-		self.assertEqual(StrucT.add_struc('FreshToo').name, 'FreshToo')
-		self.assertEqual(StrucT.create_struc('FreshThree').name, 'FreshThree')
 		with self.assertRaisesRegex(IDAError, 'exists'):
 			StrucT.create('Fresh')
 		with self.assertRaisesRegex(IDAError, 'not acceptable'):

@@ -24,7 +24,6 @@ class TestFunc(harness.IDATestCase):
 		inside = sym('compute') + 12
 		self.assertEqual(Func.at(inside).start, sym('compute'))
 		self.assertEqual(Func.at(Pointer(inside)), Func.at('_compute'))
-		self.assertEqual(Func.func_at(inside), Func.at(inside))
 		self.assertIsNone(Func.at(sym('hero')))
 		self.assertIsNone(Func.at(0x10))
 
@@ -92,7 +91,6 @@ class TestDecompile(harness.IDATestCase):
 		self.assertEqual(cfunc.original, Func('_compute'))
 		self.assertIn('add(', cfunc.pseudocode)
 		self.assertIn('mul(', cfunc.pseudocode)
-		self.assertEqual(cfunc.psuedocode, cfunc.pseudocode)
 		self.assertNotIn('\x01', cfunc.pseudocode)
 
 	def test_failure(self):
