@@ -315,13 +315,15 @@ class TestPseudocode(harness.IDATestCase):
 		self.assertEqual(cfunc.lines[0], '__int64 __fastcall compute(unsigned int a1)')
 		self.assertEqual(cfunc.lines[-1], '}')
 		self.assertFalse(any('\x01' in line or '\x02' in line for line in cfunc.lines))
-		self.assertEqual(cfunc.text(), cfunc.pseudocode)
+		self.assertEqual(cfunc.text(decls=True), cfunc.pseudocode)
 
 	def test_without_declarations(self):
 		cfunc = Func('_compute').decompile()
 		lines = cfunc.lines
 		self.assertEqual(lines[2:6], ['  __int64 v1; // x0', '  unsigned int v3; // [xsp+Ch] [xbp-14h]', '  unsigned int v4; // [xsp+18h] [xbp-8h]', ''])
 		self.assertEqual(cfunc.text(decls=False).split('\n'), lines[:2] + lines[6:])
+		# Which is what it gives when nothing is said.
+		self.assertEqual(cfunc.text(), cfunc.text(decls=False))
 		main = Func('_main').decompile()
 		text = main.text(decls=False).split('\n')
 		self.assertEqual(text[:3], ['int __fastcall main(int argc, const char **argv, const char **envp)', '{', '  v4 = compute(a1: argc);'])
@@ -339,7 +341,7 @@ class TestPseudocode(harness.IDATestCase):
 		self.assertIn('v8 = v7 + player_power(a1: &hero);', text)
 		greet = Func('_greet').decompile().text(shorten=3)
 		self.assertIn('pri…(a1: "hello fixture %s\\n", a1)', greet)
-		compute = Func('_compute').decompile().text(shorten=2)
+		compute = Func('_compute').decompile().text(decls=True, shorten=2)
 		self.assertIn('  __… v1; // x0', compute)
 		self.assertIn('// [xsp+Ch] [xbp-14h]', compute)
 
@@ -352,9 +354,9 @@ class TestPseudocode(harness.IDATestCase):
 	def test_max_lines(self):
 		cfunc = Func('_compute').decompile()
 		total = len(cfunc.lines)
-		self.assertEqual(cfunc.text(max_lines=3).split('\n'), cfunc.lines[:3] + [f'// … {total - 3} more lines'])
-		self.assertEqual(cfunc.text(max_lines=total), cfunc.pseudocode)
-		self.assertEqual(cfunc.text(max_lines=0), f'// … {total} more lines')
+		self.assertEqual(cfunc.text(decls=True, max_lines=3).split('\n'), cfunc.lines[:3] + [f'// … {total - 3} more lines'])
+		self.assertEqual(cfunc.text(decls=True, max_lines=total), cfunc.pseudocode)
+		self.assertEqual(cfunc.text(decls=True, max_lines=0), f'// … {total} more lines')
 		short = cfunc.text(decls=False, max_lines=2, shorten=5).split('\n')
 		self.assertEqual(short, ['__int… __fas… compu…(unsig… int a1)', '{', f'// … {total - 4 - 2} more lines'])
 		with self.assertRaises(ValueError):
@@ -364,7 +366,8 @@ class TestPseudocode(harness.IDATestCase):
 
 	def test_func_pseudocode(self):
 		f = Func('_compute')
-		self.assertEqual(f.pseudocode(), f.decompile().pseudocode)
+		self.assertEqual(f.pseudocode(), f.decompile().text())
+		self.assertEqual(f.pseudocode(decls=True), f.decompile().pseudocode)
 		self.assertEqual(f.pseudocode(decls=False, max_lines=4), f.decompile().text(decls=False, max_lines=4))
 		with self.assertRaises(TypeError):
 			f.pseudocode(colour=True)

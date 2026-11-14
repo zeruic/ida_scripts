@@ -332,6 +332,31 @@ if IN_IDA:
 		def visit_expr(self, e: 'ida_hexrays.cexpr_t'):
 			return self.add_item(e, 'expr')
 
+	class CallCollector(ida_hexrays.ctree_visitor_t):
+		''' Utility class used to collect the calls of a decompiled function. '''
+
+		def __init__(self):
+			ida_hexrays.ctree_visitor_t.__init__(self, ida_hexrays.CV_FAST)
+			self.calls = []
+
+		def visit_expr(self, e: 'ida_hexrays.cexpr_t'):
+			# A helper such as LODWORD(x) is printed as a call, and is none.
+			if e.op == ida_hexrays.cot_call and e.x.op != ida_hexrays.cot_helper:
+				callee = e.x.obj_ea if e.x.op == ida_hexrays.cot_obj else None
+				if callee is not None and compat.func_start(callee) == callee:
+					target, kind, text = Func(callee), 'direct', ida_name.get_name(callee) or hex(callee)
+				else:
+					target, kind, text = None, 'indirect', expression_text(e.x)
+				self.calls.append(Call(e.ea, kind, target, text, [expression_text(arg) for arg in e.a]))
+			return 0
+
+	# In a tagged pseudocode line: the anchor of an item, then its text inside one colour.
+	ANCHORED_TEXT = re.compile(re.escape(ida_lines.SCOLOR_ON + ida_lines.SCOLOR_ADDR) + r'([0-9A-Fa-f]{%d})' % ida_lines.COLOR_ADDR_SIZE + re.escape(ida_lines.SCOLOR_ON) + r'(.)([^\x01\x02]+)' + re.escape(ida_lines.SCOLOR_OFF) + r'\2', re.S)
+
+def expression_text(expression: 'ida_hexrays.cexpr_t') -> str:
+	''' An expression of a decompiled function as the pseudocode has it. '''
+	return ida_lines.tag_remove(expression.print1(None))
+
 @auto_repr(['original'])
 class CFunc:
 	''' Represent a decompiled function. '''
@@ -370,6 +395,43 @@ class CFunc:
 		''' Pseudocode of the decompiled function. '''
 		return '\n'.join(self.lines)
 
+	def _calls(self) -> List['Call']:
+		''' Every call in the pseudocode, in address order. '''
+		collector = CallCollector()
+		collector.apply_to(self.decompiled.body, None)
+		return sorted(collector.calls, key=lambda call: call.site)
+
+	@property
+	def calls(self) -> List['Call']:
+		''' The calls in the pseudocode with their arguments, in address order. Calls to a name that matches `Func.ignore` are left out.
+
+		Each `Call` has `args`, the arguments as the pseudocode has them. A call to a function is `'direct'`, with the function's name as its `text`. Any other is `'indirect'`, with the expression that is called as its `text`. What the decompiler prints as a call and is none, such as `LODWORD(x)`, is left out.
+		'''
+		ignore = [re.compile(pattern) for pattern in Func.ignore]
+		return [call for call in self._calls() if call.target is None or not any(regex.search(call.text) for regex in ignore)]
+
+	def _ignored_names(self) -> Set[str]:
+		''' How the pseudocode spells the functions that match `Func.ignore`. It can spell a name differently from IDA: `_add` is `add` there, and a character C does not allow is `_`. '''
+		ignore = [re.compile(pattern) for pattern in Func.ignore]
+		if not ignore:
+			return set()
+		# The items are numbered once the pseudocode is printed.
+		lines = self.decompiled.get_pseudocode()
+		items = self.decompiled.treeitems
+		names = set()
+		for line in lines:
+			for anchor, _, text in ANCHORED_TEXT.findall(line.line):
+				anchor = int(anchor, 16)
+				index = anchor & ida_hexrays.ANCHOR_INDEX
+				if anchor & ida_hexrays.ANCHOR_MASK != ida_hexrays.ANCHOR_CITEM or index >= len(items):
+					continue
+				item = items[index]
+				if item.op != ida_hexrays.cot_obj:
+					continue
+				ea = item.cexpr.obj_ea
+				if compat.func_start(ea) == ea and any(regex.search(ida_name.get_name(ea) or hex(ea)) for regex in ignore):
+					names.add(text)
+		return names
 
 	def _declarations(self, lines: List[str]) -> range:
 		''' Where `lines`, just taken from `CFunc.lines`, declare the local variables: the lines after the opening brace, and the blank line after them. Empty when there are none. '''
@@ -380,17 +442,25 @@ class CFunc:
 		end = header + 1 if header < len(lines) and lines[header] == '' else header
 		return range(brace + 1, end)
 
-	def text(self, decls: bool = True, max_lines: int = None, shorten: int = None) -> str:
-		''' The pseudocode, optionally made shorter.
+	def text(self, decls: bool = False, max_lines: int = None, shorten: int = None, start: int = 0, hide: Union[str, Iterable[str]] = None, ignore: bool = False) -> str:
+		''' The pseudocode, without the declarations of its local variables. The options cut it to a window (`start`, `max_lines`), shorten long identifiers (`shorten`), and leave statements out (`hide` by a regular expression, `ignore` for the calls of functions in `Func.ignore`).
+
+		A statement that `hide` or `ignore` takes out takes with it what it would leave empty: the `if` or `else` it was the whole body of, and a block with nothing left in it. Where that would change how the rest reads, as for the first branch of an `if` that has an `else`, or the body of a loop, the statement stays. A last line `// … N lines hidden` says how many lines went.
 
 		Parameters
 		----------
-		decls : bool, default = True
-			`False` leaves out the declarations of the local variables at the top of the body, and the blank line after them.
+		decls : bool, default = False
+			`True` keeps the declarations of the local variables at the top of the body, and the blank line after them.
 		max_lines : int, default = None
 			Keep only the first `max_lines` lines, then a line `// … N more lines` saying how many were cut.
 		shorten : int, default = None
 			Cut every identifier longer than `shorten` characters to its first `shorten` characters followed by `…`. String literals and comments stay as they are.
+		start : int, default = 0
+			Leave out the first `start` lines, with a line `// … N lines above` in their place. Together with `max_lines` this shows a window, such as what an earlier call cut off. The lines are counted after `decls`, `hide` and `ignore` took theirs out.
+		hide : str or iterable of str, default = None
+			Leave out every line that one of these regular expressions matches (`re.search`), as a whole statement, see below.
+		ignore : bool, default = False
+			Leave out the statements that only call a function matching `Func.ignore`, such as `init_once(&flag);`. A call whose result is used stays.
 
 		Returns
 		-------
@@ -401,14 +471,27 @@ class CFunc:
 			raise ValueError(f'max_lines must be 0 or more, not {max_lines}')
 		if shorten is not None and shorten < 1:
 			raise ValueError(f'shorten must be 1 or more, not {shorten}')
+		if start < 0:
+			raise ValueError(f'start must be 0 or more, not {start}')
 		lines = self.lines
 		if not decls:
 			skipped = self._declarations(lines)
 			lines = [line for n, line in enumerate(lines) if n not in skipped]
+		patterns = [re.compile(pattern) for pattern in ([hide] if isinstance(hide, str) else hide or [])]
+		names = self._ignored_names() if ignore else set()
+		hidden = 0
+		if patterns or names:
+			lines, hidden = hide_lines(lines, patterns, names)
 		if shorten is not None:
 			lines = [shorten_identifiers(line, shorten) for line in lines]
-		if max_lines is not None and len(lines) > max_lines:
-			lines = lines[:max_lines] + [f'// … {len(lines) - max_lines} more lines']
+		if start:
+			above = min(start, len(lines))
+			lines = [f'// … {above} line{"" if above == 1 else "s"} above'] + lines[start:]
+		shown = len(lines) - bool(start)
+		if max_lines is not None and shown > max_lines:
+			lines = lines[:max_lines + bool(start)] + [f'// … {shown - max_lines} more lines']
+		if hidden:
+			lines.append(f'// … {hidden} line{"" if hidden == 1 else "s"} hidden')
 		return '\n'.join(lines)
 
 	def grep(self, pattern: str, context: int = 2) -> str:
@@ -457,12 +540,98 @@ def shorten_identifiers(line: str, limit: int) -> str:
 		return token[:limit] + '…'
 	return TOKEN.sub(replace, line)
 
-@auto_repr(['site', 'kind', 'target', 'text'], { 'site' : hex, 'target' : lambda f: hex(f.start) })
+def code_part(line: str) -> str:
+	''' A line of C without its `//` comment and the spaces at its end. '''
+	for match in TOKEN.finditer(line):
+		if match.group(0).startswith('//'):
+			return line[:match.start()].rstrip()
+	return line.rstrip()
+
+# The first line of an `if`, an `else if` or an `else`.
+BRANCH = re.compile(r'(?:else\s+)?if\s*\(|else$')
+
+def hide_lines(lines: List[str], patterns: List['re.Pattern'], names: Set[str]) -> Tuple[List[str], int]:
+	''' Take statements out of pseudocode, and what they would leave empty: the work behind `hide` and `ignore` of `CFunc.text`.
+
+	A line that one of `patterns` matches is a statement to take out, and so is a statement that is nothing but a call of one of `names`. Returns the lines that stay, and how many went.
+	'''
+	count = len(lines)
+	code = [code_part(line) for line in lines]
+	indent = [len(line) - len(line.lstrip(' ')) for line in lines]
+	hidden = [False] * count
+	call = re.compile(r'\s*(?:' + '|'.join(re.escape(name) for name in sorted(names)) + r')\(') if names else None
+
+	def is_open(n: int) -> bool:
+		# The header of an `if` without braces ends neither a statement nor a block, and neither does a wrapped line.
+		text = code[n].strip()
+		return bool(text) and not text.endswith((';', '{', '}', ':'))
+
+	def is_else(n: int) -> bool:
+		return n < count and not hidden[n] and re.match(r'else\b', code[n].strip()) is not None
+
+	def statement_end(n: int) -> Optional[int]:
+		for last in range(n, min(n + 40, count)):
+			if last > n and indent[last] <= indent[n]:
+				return None
+			if code[last].endswith(';'):
+				return last
+		return None
+
+	def try_hide(first: int, last: int) -> bool:
+		# Hides the statement in these lines, with every `if` or `else` it was the whole body of. Hides nothing where the rest would read differently.
+		while first > 0 and is_open(first - 1):
+			head = first - 1
+			while head >= 0 and indent[head] >= indent[first]:
+				head -= 1
+			if head < 0:
+				return False
+			text = code[head].strip()
+			if not BRANCH.match(text) or (text != 'else' and is_else(last + 1)):
+				return False
+			first = head
+		for n in range(first, last + 1):
+			hidden[n] = True
+		return True
+
+	n = 0
+	while n < count:
+		last = None
+		if any(pattern.search(lines[n]) for pattern in patterns):
+			last = n
+		elif call and call.match(lines[n]):
+			last = statement_end(n)
+		if last is not None and try_hide(n, last):
+			n = last
+		n += 1
+
+	# A block that lost every line goes with its `if` or `else`, which can empty the block around it in turn.
+	emptied = True
+	while emptied:
+		emptied = False
+		shown = [n for n in range(count) if not hidden[n]]
+		for opening, closing in zip(shown, shown[1:]):
+			if code[opening].strip() != '{' or code[closing].strip() != '}' or closing == opening + 1 or indent[opening] != indent[closing]:
+				continue
+			if opening == 0 or hidden[opening - 1]:
+				continue
+			head = opening - 1
+			while head >= 0 and indent[head] > indent[opening]:
+				head -= 1
+			if head < 0 or indent[head] != indent[opening]:
+				continue
+			text = code[head].strip()
+			if not BRANCH.match(text) or (text != 'else' and is_else(closing + 1)):
+				continue
+			if try_hide(head, closing):
+				emptied = True
+				break
+	return [line for n, line in enumerate(lines) if not hidden[n]], sum(hidden)
+
 class Call:
 	''' Represent one call that a function makes. '''
 
-	def __init__(self, site: int, kind: str, target: Optional['Func'], text: str):
-		''' Init with the calling instruction's address, the kind of call, the called function and its text. '''
+	def __init__(self, site: int, kind: str, target: Optional['Func'], text: str, args: Optional[List[str]] = None):
+		''' Init with the calling instruction's address, the kind of call, the called function, its text, and the arguments when the call was taken from pseudocode. '''
 		self.site: int = site
 		''' Address of the calling instruction. '''
 		self.kind: str = kind
@@ -470,13 +639,26 @@ class Call:
 		self.target: Optional[Func] = target
 		''' The called function. `None` for an indirect call, or a target that is in no function. '''
 		self.text: str = text
-		''' The target's name (its address when it has none), or the operand of an indirect call such as `'X8'`. '''
+		''' The target's name (its address when it has none), or what an indirect call goes through: the operand such as `'X8'`, or the expression in a call from `CFunc.calls`. '''
+		self.args: Optional[List[str]] = args
+		''' The arguments as the pseudocode has them, in a call from `CFunc.calls`. `None` in a call from `Func.calls`, which reads the instructions. '''
+
+	def to_dict(self) -> Dict[str, Any]:
+		''' The call as a JSON-friendly `dict`, addresses as hex strings. `args` is there when the call has them. '''
+		data = { 'site' : hex(self.site), 'kind' : self.kind, 'target' : hex(self.target.start) if self.target is not None else None, 'text' : self.text }
+		if self.args is not None:
+			data['args'] = list(self.args)
+		return data
+
+	def __repr__(self) -> str:
+		args = f', args={self.args}' if self.args is not None else ''
+		return f'<Call site={hex(self.site)}, kind={self.kind}, target={hex(self.target.start) if self.target is not None else None}, text={self.text}{args}>'
 
 	def __hash__(self) -> int:
 		return hash((self.site, self.kind, self.text))
 
 	def __eq__(self, o: object) -> bool:
-		return type(o) is Call and (self.site, self.kind, self.target, self.text) == (o.site, o.kind, o.target, o.text)
+		return type(o) is Call and (self.site, self.kind, self.target, self.text, self.args) == (o.site, o.kind, o.target, o.text, o.args)
 
 def code_heads(chunks: List[Tuple[int, int]]) -> Iterator[int]:
 	''' Address of every instruction in the chunks, in order. '''

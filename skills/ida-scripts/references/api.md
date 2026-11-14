@@ -160,7 +160,8 @@ Provides class(es) for interacting with functions.
 - `body_root: CItem` The root node of the graph for this function.
 - `lines: List[str]` The pseudocode, one string per line.
 - `pseudocode: str` Pseudocode of the decompiled function.
-- `text(decls: bool = True, max_lines: int = None, shorten: int = None) -> str` The pseudocode, optionally made shorter.
+- `calls: List[Call]` The calls in the pseudocode with their arguments, in address order. Calls to a name that matches `Func.ignore` are left out.
+- `text(decls: bool = False, max_lines: int = None, shorten: int = None, start: int = 0, hide: Union[str, Iterable[str]] = None, ignore: bool = False) -> str` The pseudocode, without the declarations of its local variables. The options cut it to a window (`start`, `max_lines`), shorten long identifiers (`shorten`), and leave statements out (`hide` by a regular expression, `ignore` for the calls of functions in `Func.ignore`).
 - `grep(pattern: str, context: int = 2) -> str` The pseudocode lines that match a regular expression, with the lines around them.
 - `save(path: str) -> str` Write the pseudocode to a file, replacing what it holds. Returns the file's absolute path.
 
@@ -189,12 +190,14 @@ Provides class(es) for interacting with functions.
 
 ### Call
 
-`Call(site: int, kind: str, target: Func | None, text: str)` Represent one call that a function makes.
+`Call(site: int, kind: str, target: Func | None, text: str, args: Optional[List[str]] = None)` Represent one call that a function makes.
 
 - `site: int` Address of the calling instruction.
 - `kind: str` `'direct'`: a call instruction with a code reference. `'tail'`: a jump to the start of another function. `'indirect'`: a call instruction without a code reference, through a register or memory.
 - `target: Func | None` The called function. `None` for an indirect call, or a target that is in no function.
-- `text: str` The target's name (its address when it has none), or the operand of an indirect call such as `'X8'`.
+- `text: str` The target's name (its address when it has none), or what an indirect call goes through: the operand such as `'X8'`, or the expression in a call from `CFunc.calls`.
+- `args: Optional[List[str]]` The arguments as the pseudocode has them, in a call from `CFunc.calls`. `None` in a call from `Func.calls`, which reads the instructions.
+- `to_dict() -> Dict[str, Any]` The call as a JSON-friendly `dict`, addresses as hex strings. `args` is there when the call has them.
 
 ### Functions and values
 
