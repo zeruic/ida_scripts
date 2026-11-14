@@ -16,13 +16,25 @@ class DecompileError(IDAError):
 class DebuggerError(IDAError):
 	''' A debugger operation failed, or needed a process that is not there. '''
 
+def name_ea(name: str) -> Optional[int]:
+	''' The address of a name, `None` when the database has no such name.
+
+	A name that is not there is tried again with a leading underscore, which is how a Mach-O file has its C symbols: `main` finds `_main`.
+	'''
+	import ida_name
+	for candidate in (name, '_' + name):
+		ea = ida_name.get_name_ea(compat.BADADDR, candidate)
+		if ea != compat.BADADDR:
+			return ea
+	return None
+
 def to_ea(target: Any) -> int:
 	''' Resolve anything that stands for an address to an integer.
 
 	Parameters
 	----------
 	target : int, str, `Pointer`, `Func` or `Module`
-		A `str` is a symbol name, or a hex literal starting with `0x`.
+		A `str` is a symbol name, or a hex literal starting with `0x`. A name that is not there is tried with a leading underscore, see `name_ea`.
 
 	Returns
 	-------
@@ -42,9 +54,8 @@ def to_ea(target: Any) -> int:
 		text = target.strip()
 		if text.lower().startswith('0x'):
 			return int(text, 16)
-		import ida_name
-		ea = ida_name.get_name_ea(compat.BADADDR, text)
-		if ea == compat.BADADDR:
+		ea = name_ea(text)
+		if ea is None:
 			raise LookupError(f'no symbol named {text!r}')
 		return ea
 	for attribute in ('addr', 'start'):

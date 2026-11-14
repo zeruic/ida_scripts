@@ -499,9 +499,9 @@ class Func:
 
 	@staticmethod
 	def find(name: str) -> Optional['Func']:
-		''' Find function by name. '''
-		ea = ida_name.get_name_ea(compat.BADADDR, name)
-		return Func(ea) if ea != compat.BADADDR and compat.func_start(ea) == ea else None
+		''' Find function by name, `None` when there is none. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`. '''
+		ea = name_ea(name)
+		return Func(ea) if ea is not None and compat.func_start(ea) == ea else None
 
 	@staticmethod
 	def at(addr: Union[int, str, Pointer]) -> Optional['Func']:

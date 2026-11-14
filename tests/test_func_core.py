@@ -15,6 +15,10 @@ class TestFunc(harness.IDATestCase):
 		self.assertEqual(Func.find('_compute').start, sym('compute'))
 		self.assertIsNone(Func.find('_hero'))
 		self.assertIsNone(Func.find('no_such_function'))
+		# A C name finds the symbol that Mach-O gives a leading underscore.
+		self.assertEqual(Func.find('compute'), Func.find('_compute'))
+		self.assertIsNone(Func.find('hero'))
+		self.assertIsNone(Func.find('__compute'))
 
 	def test_at(self):
 		inside = sym('compute') + 12
@@ -26,7 +30,7 @@ class TestFunc(harness.IDATestCase):
 
 	def test_construct(self):
 		start = sym('compute')
-		for target in (start, start + 8, '_compute', Pointer(start), Func(start)):
+		for target in (start, start + 8, '_compute', 'compute', Pointer(start), Func(start)):
 			self.assertEqual(Func(target).start, start)
 			self.assertEqual(func(target), Func(start))
 		for bad in (sym('hero'), '_hero', 0x10):

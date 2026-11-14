@@ -122,7 +122,7 @@ Provides class(es) for interacting with functions.
 - `func_at` The old name of `Func.at`.
 - `ignore: Set[str]` Regular expressions of callee names that `Func.callees` and `Func.calls` leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (`re.search`). Empty by default.
 - `start: int` Function start address.
-- `Func.find(name: str) -> Func | None` Find function by name.
+- `Func.find(name: str) -> Func | None` Find function by name, `None` when there is none. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`.
 - `Func.at(addr: Address) -> Func | None` The function containing an address, `None` when it is in no function.
 - `Func.search(pattern: str, limit: int = None) -> List[Func]` The functions whose name matches a regular expression, in address order.
 - `Func.all() -> Iterator[Func]` Every function, in address order.
@@ -218,7 +218,7 @@ Provides helper functions that work on the whole database: symbols, names, comme
 
 ### Functions and values
 
-- `find_symbol(name: str) -> Pointer | None` The address of a name, `None` when the database has no such name.
+- `find_symbol(name: str) -> Pointer | None` The address of a name, `None` when the database has no such name. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`.
 - `search_names(pattern: str, limit: int = None) -> List[Pointer]` The addresses whose name matches a regular expression, in address order.
 - `search_comments(pattern: str, limit: int = None, named_only: bool = True) -> List[Pointer]` The addresses whose comment matches a regular expression, in address order.
 - `strings(pattern: str = None, encoding: str = None, refresh: bool = False) -> List[StringRef]` IDA's string list, C and UTF-16 strings, in address order.

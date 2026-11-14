@@ -24,6 +24,14 @@ class TestToEa(harness.IDATestCase):
 	def test_name(self):
 		self.assertEqual(to_ea('_hero'), sym('hero'))
 
+	def test_name_without_its_underscore(self):
+		self.assertEqual(name_ea('_hero'), sym('hero'))
+		self.assertEqual(name_ea('hero'), sym('hero'))
+		self.assertEqual(to_ea('hero'), sym('hero'))
+		self.assertEqual(to_ea('compute'), sym('compute'))
+		self.assertIsNone(name_ea('no_such_symbol'))
+		self.assertIsNone(name_ea('__hero'))
+
 	def test_unknown_name(self):
 		with self.assertRaises(LookupError):
 			to_ea('no_such_symbol')

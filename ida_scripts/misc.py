@@ -24,9 +24,9 @@ __all__ = ['find_symbol', 'search_names', 'search_comments', 'strings', 'StringR
 # NAMES AND COMMENTS
 
 def find_symbol(name: str) -> Optional[Pointer]:
-	''' The address of a name, `None` when the database has no such name. '''
-	ea = ida_name.get_name_ea(compat.BADADDR, name)
-	return Pointer(ea) if ea != compat.BADADDR else None
+	''' The address of a name, `None` when the database has no such name. A name that is not there is tried with a leading underscore, so `main` finds a Mach-O file's `_main`. '''
+	ea = name_ea(name)
+	return Pointer(ea) if ea is not None else None
 
 def search_names(pattern: str, limit: int = None) -> List[Pointer]:
 	''' The addresses whose name matches a regular expression, in address order.

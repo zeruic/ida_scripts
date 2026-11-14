@@ -22,6 +22,9 @@ class TestNames(harness.IDATestCase):
 		self.assertIsInstance(find_symbol('_hero'), Pointer)
 		self.assertEqual(find_symbol('_compute'), sym('compute'))
 		self.assertIsNone(find_symbol('no_such_symbol'))
+		# A C name finds the symbol that Mach-O gives a leading underscore.
+		self.assertEqual(find_symbol('hero'), sym('hero'))
+		self.assertEqual(find_symbol('compute'), sym('compute'))
 		self.assertFalse(hasattr(misc, 'find_local_var'))
 
 	def test_search_names(self):
