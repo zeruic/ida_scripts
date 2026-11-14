@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import re
 from unittest import mock
@@ -6,7 +8,7 @@ import harness
 from harness import sym
 from ida_scripts import compat
 from ida_scripts import misc
-from ida_scripts.memory import Pointer, ptr
+from ida_scripts.memory import Pointer, Insn, ptr
 from ida_scripts.func import Func
 from ida_scripts.misc import *
 import ida_bytes
@@ -41,6 +43,109 @@ class TestNames(harness.IDATestCase):
 		self.assertEqual(search_names('^(sub|loc)_'), [])
 		with self.assertRaises(re.error):
 			search_names('[')
+
+class TestShow(harness.IDATestCase):
+
+	def shown(self, *args, **kwargs) -> str:
+		out = io.StringIO()
+		with contextlib.redirect_stdout(out):
+			show(*args, **kwargs)
+		return out.getvalue()
+
+	def test_describe_functions_and_addresses(self):
+		add = Func('_add')
+		self.assertEqual(describe(add), f'{hex(add.start)} _add')
+		self.assertEqual(describe(ptr('_hero')), f'{hex(sym("hero"))} _hero')
+		text = ptr('aHelloFixtureS')
+		self.assertEqual(describe(text), f'{hex(text.addr)} aHelloFixtureS  "hello fixture %s\\n"')
+		# An address inside a function says which one. The start of a function does not.
+		self.assertEqual(describe(ptr(add.start + 4)), f'{hex(add.start + 4)}  in _add')
+		self.assertEqual(describe(ptr(add.start)), f'{hex(add.start)} _add')
+		self.assertEqual(describe(ptr(0x10)), '0x10')
+
+	def test_describe_references_and_calls(self):
+		add, compute = Func('_add'), Func('_compute')
+		ref = next(x for x in add.xrefs_to if x.kind == 'call' and x.func == compute)
+		self.assertEqual(describe(ref), f'{hex(ref.frm.addr)} call -> {hex(add.start)}  in _compute')
+		data = next(x for x in ptr('_counter').xrefs_to() if x.func is not None)
+		self.assertEqual(describe(data), f'{hex(data.frm.addr)} {data.kind} -> {hex(sym("counter"))}  in _leaf')
+		self.assertEqual(describe(compute.calls[0]), f'{hex(compute.calls[0].site)} _add')
+		tail = Func('_tail_caller').calls[0]
+		self.assertEqual(describe(tail), f'{hex(tail.site)} (tail) _add')
+		indirect = Func('_apply').calls[0]
+		self.assertEqual(describe(indirect), f'{hex(indirect.site)} (indirect) X8')
+		with_args = compute.decompile().calls
+		self.assertEqual(describe(with_args[0]), f'{hex(with_args[0].site)} _add(a1, 1)')
+		self.assertEqual(describe(with_args[2]), f'{hex(with_args[2].site)} _leaf()')
+		through = Func('_apply').decompile().calls[0]
+		self.assertEqual(describe(through), f'{hex(through.site)} (indirect) a1(a2, a3)')
+
+	def test_describe_the_rest(self):
+		add = Func('_add')
+		string = strings('^narrow')[0]
+		self.assertEqual(describe(string), f'{hex(string.address.addr)} "narrow fixture"')
+		insn = Insn(add.start)
+		self.assertEqual(describe(insn), f'{hex(add.start)}  {insn.text}')
+		self.assertEqual(describe((add, 3, 'x')), f'{hex(add.start)} _add  3  x')
+		self.assertEqual(describe([add, (add, 1)]), f'{hex(add.start)} _add  {hex(add.start)} _add  1')
+		self.assertEqual(describe(None), 'None')
+		self.assertEqual(describe('as it is'), 'as it is')
+		self.assertEqual(describe(add, 6), hex(add.start)[:5] + '…')
+		self.assertEqual(describe(add, 200), describe(add))
+
+	def test_show_a_list(self):
+		callers = Func('_add').callers
+		self.assertEqual(len(callers), 3)
+		lines = [describe(f) + '\n' for f in callers]
+		self.assertEqual(self.shown(callers), ''.join(lines))
+		self.assertEqual(self.shown(callers, limit=2), ''.join(lines[:2]) + '… 1 more\n')
+		self.assertEqual(self.shown(callers, limit=3), ''.join(lines))
+		self.assertEqual(self.shown(callers, limit=None), ''.join(lines))
+		self.assertEqual(self.shown(callers, limit=0), '… 3 more\n')
+		self.assertEqual(self.shown([]), '')
+		self.assertEqual(self.shown(), '')
+
+	def test_show_what_cannot_be_counted(self):
+		first = next(Func.all())
+		self.assertEqual(self.shown(Func.all(), limit=1), describe(first) + '\n… more\n')
+		self.assertEqual(self.shown((f for f in [first]), limit=1), describe(first) + '\n')
+		self.assertEqual(self.shown(iter([None, None]), limit=1), 'None\n… more\n')
+
+	def test_show_single_things(self):
+		add, mul = Func('_add'), Func('_mul')
+		self.assertEqual(self.shown(add), describe(add) + '\n')
+		self.assertEqual(self.shown('plain text'), 'plain text\n')
+		# A tuple is one line, a list of tuples a line for each.
+		self.assertEqual(self.shown((add, 1)), describe(add) + '  1\n')
+		self.assertEqual(self.shown([(add, 1), (mul, 2)]), f'{describe(add)}  1\n{describe(mul)}  2\n')
+		self.assertEqual(self.shown({ 'first' : add, 'second' : mul }), f'first  {describe(add)}\nsecond  {describe(mul)}\n')
+		self.assertEqual(self.shown(add, [mul], 'end'), f'{describe(add)}\n{describe(mul)}\nend\n')
+
+	def test_show_cuts_lines(self):
+		long = Func.search('shortening$')
+		line = self.shown(long, width=30)
+		self.assertEqual(line, describe(long[0])[:29] + '…\n')
+		self.assertEqual(self.shown(long, width=None), describe(long[0]) + '\n')
+		self.assertEqual(self.shown(long), describe(long[0]) + '\n')
+
+class TestShowComments(harness.IDATestCase):
+
+	fresh = True
+
+	def test_comments(self):
+		add = Func('_add')
+		add.comment = 'adds two numbers\nand a second line'
+		self.assertEqual(describe(add), f'{hex(add.start)} _add  // adds two numbers')
+		hero = ptr('_hero')
+		hero.comment = 'the first player'
+		self.assertEqual(describe(hero), f'{hex(hero.addr)} _hero  // the first player')
+		inside = ptr(add.start + 4)
+		inside.comment = 'second instruction'
+		self.assertEqual(describe(inside), f'{hex(inside.addr)}  // second instruction  in _add')
+		# A string shows its text, not its comment.
+		text = ptr('aHelloFixtureS')
+		text.comment = 'a comment on a string'
+		self.assertTrue(describe(text).endswith('aHelloFixtureS  "hello fixture %s\\n"'))
 
 class TestComments(harness.IDATestCase):
 

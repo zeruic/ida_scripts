@@ -49,6 +49,11 @@ def signature(function: ast.FunctionDef, drop_self: bool) -> str:
 		parts = parts[1:]
 	if args.vararg:
 		parts.append('*' + args.vararg.arg)
+	elif args.kwonlyargs:
+		parts.append('*')
+	for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+		part = arg.arg + (f': {annotation(arg.annotation)}' if arg.annotation else '')
+		parts.append(part + (f' = {ast.unparse(default)}' if default is not None else ''))
 	if args.kwarg:
 		parts.append('**' + args.kwarg.arg)
 	returns = f' -> {annotation(function.returns)}' if function.returns else ''

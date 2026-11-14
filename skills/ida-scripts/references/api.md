@@ -149,6 +149,7 @@ Provides class(es) for interacting with functions.
 - `xrefs_to: List[Xref]` The references to the function's start, ordinary flow left out.
 - `data_refs: List[Pointer]` The addresses the function refers to as data, without duplicates and sorted: the globals it reads and writes, and the addresses it takes, such as a string's or a function's.
 - `strings: List[Tuple[Pointer, str]]` The string literals the function refers to, as `(address, text)` sorted by address. Only strings that the database defines count.
+- `outline(width: int = 120, max_lines: int = 200) -> str` What the function does at a glance: the calls it makes, in order, and the texts it refers to.
 
 ### CFunc
 
@@ -201,6 +202,8 @@ Provides class(es) for interacting with functions.
 
 ### Functions and values
 
+- `grep(pattern: str, funcs: Iterable[Address], context: int = 0, limit: int = None) -> str` The pseudocode lines of several functions that match a regular expression: `CFunc.grep` over each of them.
+- `show_code(*targets, max_lines: int = 120, **options)` Print the pseudocode of one or more functions, each under a line with its address and name.
 - `export_fingerprints(named_only: bool = True) -> Dict[str, str]` Fingerprints and names of the functions of this database, to find them in another build with `match_functions`.
 - `match_functions(fingerprints: Dict[str, str]) -> Dict[int, str]` Find the functions of another build in this database, by fingerprint.
 
@@ -222,6 +225,8 @@ Provides helper functions that work on the whole database: symbols, names, comme
 - `search_names(pattern: str, limit: int = None) -> List[Pointer]` The addresses whose name matches a regular expression, in address order.
 - `search_comments(pattern: str, limit: int = None, named_only: bool = True) -> List[Pointer]` The addresses whose comment matches a regular expression, in address order.
 - `strings(pattern: str = None, encoding: str = None, refresh: bool = False) -> List[StringRef]` IDA's string list, C and UTF-16 strings, in address order.
+- `describe(item: Any, width: int = None) -> str` One line that says what an object is, for a listing.
+- `show(*items, limit: int = 40, width: int = 120)` Print objects one to a line, each as `describe` gives it.
 - `rename_all(names: Dict[int, str], force: bool = True) -> int` Name many addresses, refreshing the decompiler once at the end.
 - `comment_all(comments: Dict[int, str], repeatable: bool = True) -> int` Comment many addresses, refreshing the decompiler once at the end. A function's start gets a function comment, any other address an address comment.
 - `annotate_all(items: Dict[int, Tuple[str | None, str | None]]) -> int` Name and comment many addresses, refreshing the decompiler once at the end.

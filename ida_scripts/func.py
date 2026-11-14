@@ -3,7 +3,9 @@
 The module itself can be called as a shorthand, like `ptr`: `func('main')` is `Func('main')`.
 '''
 
+import collections.abc
 import hashlib
+import json
 import os
 import re
 import sys
@@ -31,7 +33,7 @@ if IN_IDA:
 	import ida_xref
 	import idautils
 
-__all__ = ['Func', 'CFunc', 'CItem', 'Call', 'export_fingerprints', 'match_functions', 'disasm']
+__all__ = ['Func', 'CFunc', 'CItem', 'Call', 'grep', 'show_code', 'export_fingerprints', 'match_functions', 'disasm']
 
 def networkx():
 	''' The `networkx` module, needed only for the tree of a decompiled function. '''
@@ -935,16 +937,136 @@ class Func:
 		''' The string literals the function refers to, as `(address, text)` sorted by address. Only strings that the database defines count. '''
 		found = []
 		for ref in self.data_refs:
-			if ida_bytes.is_strlit(ida_bytes.get_flags(ref.addr)):
-				data = ida_bytes.get_strlit_contents(ref.addr, ida_bytes.get_item_size(ref.addr), ida_nalt.get_str_type(ref.addr)) or b''
-				found.append((ref, data.decode('utf-8', 'replace')))
+			text = string_at(ref.addr)
+			if text is not None:
+				found.append((ref, text))
 		return found
+
+	def outline(self, width: int = 120, max_lines: int = 200) -> str:
+		''' What the function does at a glance: the calls it makes, in order, and the texts it refers to.
+
+		The first line has the function's address and name, and after `//` the first line of its comment. Then comes one line for each call: the address of the call, the name of the function called, and the first line of that function's comment. An indirect call shows as `(indirect)` with its operand, a tail call as `(tail)` with the name. Calls of the same function right after one another are one line that ends in their number, as in `x3`. Calls to a name that matches `Func.ignore` are left out. Under a line `data` come the strings the function refers to, and the addresses it refers to that have a comment.
+
+		Parameters
+		----------
+		width : int, default = 120
+			Cut every line to this many characters. `None` for whole lines.
+		max_lines : int, default = 200
+			Keep only the first `max_lines` lines, then a line `… N more lines`. `None` for all of them.
+
+		Returns
+		-------
+		str
+			The text, lines separated by `\\n`.
+		'''
+		def remark(text: str) -> str:
+			return f'  // {first_line(text)}' if first_line(text) else ''
+		rows = []
+		for call in self.calls:
+			if call.kind == 'indirect':
+				label, about = f'(indirect) {call.text}', ''
+			else:
+				label = ('(tail) ' if call.kind == 'tail' else '') + call.text
+				about = remark(call.target.comment) if call.target is not None else ''
+			if rows and rows[-1][1] == label:
+				rows[-1][2] += 1
+			else:
+				rows.append([call.site, label, 1, about])
+		lines = [f'{hex(self.start)} {self.name}{remark(self.comment)}']
+		lines += [f'  {hex(site)}  {label}{f" x{times}" if times > 1 else ""}{about}' for site, label, times, about in rows]
+		data = []
+		for ref in self.data_refs:
+			text = string_at(ref.addr)
+			if text is not None:
+				data.append(f'  {hex(ref.addr)}  {ref.name}  {json.dumps(text, ensure_ascii=False)}')
+			elif first_line(ref.comment):
+				data.append(f'  {hex(ref.addr)}  {ref.name}{remark(ref.comment)}')
+		if data:
+			lines += ['data'] + data
+		if max_lines is not None and len(lines) > max_lines:
+			lines = lines[:max_lines] + [f'… {len(lines) - max_lines} more lines']
+		return '\n'.join(cut(line, width) for line in lines)
 
 	def __hash__(self) -> int:
 		return self.start
 
 	def __eq__(self, o: object) -> bool:
 		return type(o) is Func and self.start == o.start
+
+def string_at(ea: int) -> Optional[str]:
+	''' The string literal that the database defines at an address, `None` when it defines none there. '''
+	if not ida_bytes.is_strlit(ida_bytes.get_flags(ea)):
+		return None
+	data = ida_bytes.get_strlit_contents(ea, ida_bytes.get_item_size(ea), ida_nalt.get_str_type(ea)) or b''
+	return data.decode('utf-8', 'replace')
+
+def each_func(targets: Iterable[Any]) -> Iterator['Func']:
+	''' A `Func` for each target. A list, tuple or other iterable among the targets stands for the functions in it. '''
+	for target in targets:
+		if isinstance(target, Func):
+			yield target
+		elif isinstance(target, (int, str, Pointer)) or not isinstance(target, collections.abc.Iterable):
+			yield Func(target)
+		else:
+			yield from each_func(target)
+
+def grep(pattern: str, funcs: Iterable[Union[int, str, Pointer, 'Func']], context: int = 0, limit: int = None) -> str:
+	''' The pseudocode lines of several functions that match a regular expression: `CFunc.grep` over each of them.
+
+	Parameters
+	----------
+	pattern : str
+		Searched for anywhere in a line (`re.search`).
+	funcs : iterable
+		The functions to look in, each a `Func` or anything `Func` takes. `Func.search(r'^Player::')` gives such a list.
+	context : int, default = 0
+		How many lines to show before and after each match.
+	limit : int, default = None
+		Stop after this many functions had a match.
+
+	Returns
+	-------
+	str
+		For each function with a match: a line with its address and name, then its matching lines as `CFunc.grep` gives them. A blank line separates the functions. A function that cannot be decompiled is skipped, and a last line `// N not decompiled: …` names those. `''` when nothing matches.
+	'''
+	re.compile(pattern)
+	parts, failed = [], []
+	for f in each_func(funcs):
+		if limit is not None and len(parts) >= limit:
+			break
+		try:
+			found = f.decompile().grep(pattern, context)
+		except DecompileError:
+			failed.append(f.name or hex(f.start))
+			continue
+		if found:
+			parts.append(f'{hex(f.start)} {f.name}\n{found}')
+	if failed:
+		parts.append(f'// {len(failed)} not decompiled: {", ".join(failed[:10])}{" …" if len(failed) > 10 else ""}')
+	return '\n\n'.join(parts)
+
+def show_code(*targets: Union[int, str, Pointer, 'Func'], max_lines: int = 120, **options):
+	''' Print the pseudocode of one or more functions, each under a line with its address and name.
+
+	The name in that line is IDA's, which the pseudocode may spell differently. A function that cannot be decompiled prints the reason in its place, and the others still print.
+
+	Parameters
+	----------
+	*targets
+		Each a `Func`, anything `Func` takes, or a list of those.
+	max_lines : int, default = 120
+		Print only the first `max_lines` lines of each function, as `CFunc.text` cuts them. `None` prints all of it.
+	**options
+		The other options of `CFunc.text`: `decls`, `shorten`, `start`, `hide` and `ignore`.
+	'''
+	parts = []
+	for f in each_func(targets):
+		try:
+			body = f.pseudocode(max_lines=max_lines, **options)
+		except DecompileError as error:
+			body = f'// {error}'
+		parts.append(f'// {hex(f.start)} {f.name}\n{body}')
+	print('\n\n'.join(parts))
 
 def set_prototype(ea: int, declaration: str) -> bool:
 	''' Apply a C prototype to an address without refreshing the decompiler. Bulk changes call this, then refresh once. '''

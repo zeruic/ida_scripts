@@ -132,3 +132,12 @@ def hexdump(data, length = 16, sep = '.', start_offset = 0):
 def to_hex(n: int) -> str:
 	return hex(n)[2:].upper()
 
+def first_line(text: Optional[str]) -> str:
+	''' The first line of a text without the spaces around it, `''` for no text. '''
+	return text.strip().split('\n')[0].strip() if text else ''
+
+def cut(text: str, width: Optional[int]) -> str:
+	''' `text` cut to `width` characters, the last one an `…` when something was cut. `None` leaves it whole. '''
+	if width is None or len(text) <= width:
+		return text
+	return text[:max(width - 1, 0)] + '…'

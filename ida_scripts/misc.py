@@ -1,13 +1,16 @@
 ''' Provides helper functions that work on the whole database: symbols, names, comments and strings, and annotations in bulk. '''
 
+import collections.abc
+import itertools
+import json
 import re
 from typing import *
 
 from . import compat
 from .compat import IN_IDA
 from .utils import *
-from .memory import Pointer, set_name
-from .func import Func
+from .memory import Pointer, Xref, Insn, set_name
+from .func import Func, Call, string_at
 
 if IN_IDA:
 	import ida_bytes
@@ -19,7 +22,7 @@ if IN_IDA:
 	import ida_typeinf
 	import idautils
 
-__all__ = ['find_symbol', 'search_names', 'search_comments', 'strings', 'StringRef', 'rename_all', 'comment_all', 'annotate_all', 'export_annotations', 'import_annotations']
+__all__ = ['find_symbol', 'search_names', 'search_comments', 'strings', 'StringRef', 'describe', 'show', 'rename_all', 'comment_all', 'annotate_all', 'export_annotations', 'import_annotations']
 
 # NAMES AND COMMENTS
 
@@ -180,6 +183,75 @@ def build_string_list() -> List[Tuple[int, int, int]]:
 		# The next user of the list, the Strings window for one, builds it again with the restored options.
 		ida_strlist.clear_strlist()
 	return sorted(items)
+
+# SHOWING
+
+def describe(item: Any, width: int = None) -> str:
+	''' One line that says what an object is, for a listing.
+
+	A `Func` is its address and name, and after `//` the first line of its comment. A `Pointer` is its address and name, then the string it points at or its comment, and the function it lies in when it is not that function's start. An `Xref` is where it comes from, its kind, where it goes, and the function it comes from. A `Call` is its address and what is called, with the arguments when it has them. A `StringRef` is its address and text, an `Insn` its address and disassembly. A tuple or list is its parts, each described this way, two spaces apart. Anything else is its `str`.
+
+	Parameters
+	----------
+	item : Any
+		The object.
+	width : int, default = None
+		Cut the line to this many characters.
+
+	Returns
+	-------
+	str
+	'''
+	def remark(text: str) -> str:
+		return f'  // {first_line(text)}' if first_line(text) else ''
+	if isinstance(item, Func):
+		line = f'{hex(item.start)} {item.name}{remark(item.comment)}'
+	elif isinstance(item, Pointer):
+		text = string_at(item.addr)
+		line = f'{hex(item.addr)} {item.name}'.rstrip()
+		line += f'  {json.dumps(text, ensure_ascii=False)}' if text is not None else remark(item.comment)
+		inside = item.func
+		if inside is not None and inside.start != item.addr:
+			line += f'  in {inside.name}'
+	elif isinstance(item, Xref):
+		inside = item.func
+		line = f'{hex(item.frm.addr)} {item.kind} -> {hex(item.to.addr)}' + (f'  in {inside.name}' if inside is not None else '')
+	elif isinstance(item, Call):
+		kind = '' if item.kind == 'direct' else f'({item.kind}) '
+		line = f'{hex(item.site)} {kind}{item.text}' + (f'({", ".join(item.args)})' if item.args is not None else '')
+	elif isinstance(item, StringRef):
+		line = f'{hex(item.address.addr)} {json.dumps(item.text, ensure_ascii=False)}'
+	elif isinstance(item, Insn):
+		line = f'{hex(item.address)}  {item.text}'
+	elif isinstance(item, (tuple, list)):
+		line = '  '.join(describe(part) for part in item)
+	else:
+		line = str(item)
+	return cut(line, width)
+
+def show(*items: Any, limit: int = 40, width: int = 120):
+	''' Print objects one to a line, each as `describe` gives it.
+
+	Parameters
+	----------
+	*items
+		A list, a generator or another iterable prints a line for each thing in it, a `dict` a line for each key with its value. Anything else, a tuple included, prints one line.
+	limit : int, default = 40
+		Print only the first `limit` lines of each iterable, then a line `… N more`, or `… more` where the rest cannot be counted without going through it. `None` prints all of them.
+	width : int, default = 120
+		Cut every line to this many characters. `None` for whole lines.
+	'''
+	for item in items:
+		if isinstance(item, dict):
+			item = list(item.items())
+		if isinstance(item, (str, bytes, tuple)) or not isinstance(item, collections.abc.Iterable):
+			print(describe(item, width))
+			continue
+		rows = iter(item)
+		for row in itertools.islice(rows, limit):
+			print(describe(row, width))
+		if next(rows, rows) is not rows:
+			print(f'… {len(item) - limit} more' if isinstance(item, collections.abc.Sized) else '… more')
 
 # BULK
 

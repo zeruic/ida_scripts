@@ -63,6 +63,21 @@ class TestAutoRepr(harness.IDATestCase):
 		self.assertEqual(value['f']['name'], '_add')
 		json.dumps(value)
 
+class TestText(harness.IDATestCase):
+
+	def test_cut(self):
+		self.assertEqual(cut('abcdef', 4), 'abc…')
+		self.assertEqual(cut('abcd', 4), 'abcd')
+		self.assertEqual(cut('abcdef', None), 'abcdef')
+		self.assertEqual(cut('abcdef', 1), '…')
+		self.assertEqual(cut('', 3), '')
+
+	def test_first_line(self):
+		self.assertEqual(first_line('  one \n two'), 'one')
+		self.assertEqual(first_line('\n\nlater'), 'later')
+		self.assertEqual(first_line(''), '')
+		self.assertEqual(first_line(None), '')
+
 class TestHexdump(harness.IDATestCase):
 
 	def test_layout(self):

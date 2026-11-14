@@ -1,12 +1,24 @@
-''' What makes the pseudocode of a function quick to read: a window of it, statements left out, and its calls with their arguments. '''
+''' What makes a function quick to read: a window of its pseudocode, statements left out, its calls with their arguments, its outline, and a search over many functions. '''
 
+import contextlib
+import io
 import json
 import re
 from unittest import mock
 
 import harness
 from harness import sym
+from ida_scripts import compat
+from ida_scripts.memory import Pointer
+from ida_scripts import func
 from ida_scripts.func import Func, Call, hide_lines, code_part
+
+def printed(function, *args, **kwargs) -> str:
+	''' What a call prints. '''
+	out = io.StringIO()
+	with contextlib.redirect_stdout(out):
+		function(*args, **kwargs)
+	return out.getvalue()
 
 class TestWindow(harness.IDATestCase):
 
@@ -201,6 +213,123 @@ class TestDecompiledCalls(harness.IDATestCase):
 		self.assertNotEqual(call, plain)
 		self.assertEqual(call, Func('_compute').decompile().calls[0])
 		self.assertEqual(Call(1, 'direct', None, 'x', []).to_dict()['args'], [])
+
+class TestOutline(harness.IDATestCase):
+
+	def test_calls_in_order(self):
+		f = Func('_compute')
+		sites = [call.site for call in f.calls]
+		self.assertEqual(f.outline().split('\n'), [f'{hex(f.start)} _compute', f'  {hex(sites[0])}  _add', f'  {hex(sites[1])}  _mul', f'  {hex(sites[2])}  _leaf', f'  {hex(sites[3])}  _add'])
+		# leaf reads a counter, which says nothing by itself.
+		self.assertEqual(Func('_leaf').outline(), f'{hex(sym("leaf"))} _leaf')
+
+	def test_kinds(self):
+		apply, tail = Func('_apply'), Func('_tail_caller')
+		self.assertEqual(apply.outline().split('\n')[1], f'  {hex(apply.calls[0].site)}  (indirect) X8')
+		self.assertEqual(tail.outline().split('\n')[1], f'  {hex(tail.calls[0].site)}  (tail) _add')
+
+	def test_strings(self):
+		greet = Func('_greet')
+		address = Pointer('aHelloFixtureS').addr
+		self.assertEqual(greet.outline().split('\n'), [f'{hex(greet.start)} _greet', f'  {hex(greet.calls[0].site)}  _printf', 'data', f'  {hex(address)}  aHelloFixtureS  "hello fixture %s\\n"'])
+		self.assertEqual(Func('_main').outline().split('\n')[-2:], ['data', f'  {hex(sym("wide_text"))}  _wide_text  "wide fixture"'])
+
+	def test_repeats_and_ignore(self):
+		f = Func('_compute')
+		first = f.calls[0].site
+		with mock.patch.object(Func, 'ignore', { '^_mul$', '^_leaf$' }):
+			self.assertEqual(f.outline().split('\n'), [f'{hex(f.start)} _compute', f'  {hex(first)}  _add x2'])
+		with mock.patch.object(Func, 'ignore', { '^_' }):
+			self.assertEqual(f.outline(), f'{hex(f.start)} _compute')
+
+	def test_cut(self):
+		f = Func('_main')
+		whole = f.outline(width=None, max_lines=None).split('\n')
+		self.assertEqual(len(whole), 11)
+		self.assertEqual(f.outline().split('\n'), whole)
+		narrow = f.outline(width=40).split('\n')
+		self.assertTrue(all(len(line) <= 40 for line in narrow))
+		long = next(n for n, line in enumerate(whole) if 'this_is_a_very_long' in line)
+		self.assertEqual(narrow[long], whole[long][:39] + '…')
+		self.assertEqual(narrow[0], whole[0])
+		self.assertEqual(f.outline(max_lines=3).split('\n'), whole[:3] + ['… 8 more lines'])
+		self.assertEqual(f.outline(max_lines=11).split('\n'), whole)
+
+class TestOutlineWithComments(harness.IDATestCase):
+
+	fresh = True
+
+	def test_comments(self):
+		Func('_add').comment = 'adds two numbers\nand a second line'
+		Func('_compute').comment = '  the sum  '
+		Pointer('_counter').comment = 'how many'
+		Pointer('aHelloFixtureS').comment = 'a comment on a string'
+		compute, leaf = Func('_compute'), Func('_leaf')
+		lines = compute.outline().split('\n')
+		self.assertEqual(lines[0], f'{hex(compute.start)} _compute  // the sum')
+		self.assertEqual(lines[1], f'  {hex(compute.calls[0].site)}  _add  // adds two numbers')
+		self.assertEqual(lines[2], f'  {hex(compute.calls[1].site)}  _mul')
+		self.assertEqual(leaf.outline().split('\n'), [f'{hex(leaf.start)} _leaf', 'data', f'  {hex(sym("counter"))}  _counter  // how many'])
+		# A string shows its text, with or without a comment.
+		self.assertTrue(Func('_greet').outline().endswith('aHelloFixtureS  "hello fixture %s\\n"'))
+		tail = Func('_tail_caller')
+		self.assertEqual(tail.outline().split('\n')[1], f'  {hex(tail.calls[0].site)}  (tail) _add  // adds two numbers')
+
+class TestGrep(harness.IDATestCase):
+
+	def test_several_functions(self):
+		compute, dispatch = Func('_compute'), Func('_dispatch')
+		pattern = r'\badd\('
+		found = func.grep(pattern, [compute, '_leaf', dispatch.start])
+		self.assertEqual(found.split('\n\n'), [f'{hex(compute.start)} _compute\n{compute.decompile().grep(pattern, 0)}', f'{hex(dispatch.start)} _dispatch\n{dispatch.decompile().grep(pattern, 0)}'])
+		self.assertEqual(len(compute.decompile().grep(pattern, 0).split('\n--\n')), 2)
+		self.assertEqual(func.grep(pattern, Func.search('^_(compute|leaf|dispatch)$')), found)
+		self.assertEqual(func.grep(pattern, [[compute], ('_leaf', [dispatch])]), found)
+		self.assertEqual(func.grep('no such text', [compute, dispatch]), '')
+		self.assertEqual(func.grep(pattern, []), '')
+
+	def test_context_and_limit(self):
+		compute, dispatch = Func('_compute'), Func('_dispatch')
+		found = func.grep(r'leaf\(', [compute], context=1)
+		self.assertEqual(found, f'{hex(compute.start)} _compute\n{compute.decompile().grep("leaf", 1)}')
+		self.assertEqual(len(found.split('\n')), 4)
+		every = func.grep('return', Func.search('^_(add|mul|leaf)$'))
+		self.assertEqual(len(every.split('\n\n')), 3)
+		self.assertEqual(func.grep('return', Func.search('^_(add|mul|leaf)$'), limit=2), '\n\n'.join(every.split('\n\n')[:2]))
+		self.assertEqual(func.grep('return', Func.all(), limit=0), '')
+
+	def test_what_cannot_be_decompiled(self):
+		with mock.patch.object(compat, 'decompile', lambda start: (None, 'broken')):
+			self.assertEqual(func.grep('x', ['_add', '_mul']), '// 2 not decompiled: _add, _mul')
+			many = func.grep('x', list(Func.all()))
+			self.assertRegex(many, rf'^// {compat.func_count()} not decompiled: (\w+, ){{9}}\w+ …$')
+		with self.assertRaises(re.error):
+			func.grep('(', [])
+		with self.assertRaises(LookupError):
+			func.grep('x', ['no_such_function'])
+
+class TestShowCode(harness.IDATestCase):
+
+	def test_functions_under_their_names(self):
+		add, leaf = Func('_add'), Func('_leaf')
+		self.assertEqual(printed(func.show_code, '_add', leaf), f'// {hex(add.start)} _add\n{add.pseudocode()}\n\n// {hex(leaf.start)} _leaf\n{leaf.pseudocode()}\n')
+		self.assertEqual(printed(func.show_code, [add, [leaf.start]]), printed(func.show_code, add, leaf))
+		self.assertIsNone(func.show_code())
+
+	def test_options(self):
+		main, compute = Func('_main'), Func('_compute')
+		self.assertEqual(printed(func.show_code, main, max_lines=3), f'// {hex(main.start)} _main\n{main.pseudocode(max_lines=3)}\n')
+		self.assertEqual(printed(func.show_code, compute, decls=True, max_lines=None), f'// {hex(compute.start)} _compute\n{compute.decompile().pseudocode}\n')
+		self.assertEqual(printed(func.show_code, main, start=4, shorten=8, hide='greet'), f'// {hex(main.start)} _main\n{main.pseudocode(max_lines=120, start=4, shorten=8, hide="greet")}\n')
+		with self.assertRaises(TypeError):
+			func.show_code('_add', colour=True)
+
+	def test_what_cannot_be_decompiled(self):
+		add = Func('_add')
+		with mock.patch.object(compat, 'decompile', lambda start: (None, 'broken')):
+			self.assertEqual(printed(func.show_code, '_add'), f'// {hex(add.start)} _add\n// cannot decompile _add: broken\n')
+		with self.assertRaises(LookupError):
+			func.show_code('no_such_function')
 
 if __name__ == '__main__':
 	harness.main()
