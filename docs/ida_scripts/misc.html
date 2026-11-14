@@ -64,6 +64,12 @@
 
             </li>
             <li>
+                    <a class="function" href="#describe">describe</a>
+            </li>
+            <li>
+                    <a class="function" href="#show">show</a>
+            </li>
+            <li>
                     <a class="function" href="#rename_all">rename_all</a>
             </li>
             <li>
@@ -111,7 +117,7 @@
     </div>
     <a class="headerlink" href="#find_symbol"></a>
     
-            <div class="docstring"><p>The address of a name, <code>None</code> when the database has no such name.</p>
+            <div class="docstring"><p>The address of a name, <code>None</code> when the database has no such name. A name that is not there is tried with a leading underscore, so <code>main</code> finds a Mach-O file's <code>_main</code>.</p>
 </div>
 
 
@@ -297,6 +303,63 @@ Build the list again, after the database gained or lost strings.</li>
 
 
                             </div>
+                </section>
+                <section id="describe">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">describe</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">item</span><span class="p">:</span> <span class="n">Any</span>, </span><span class="param"><span class="n">width</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#describe"></a>
+    
+            <div class="docstring"><p>One line that says what an object is, for a listing.</p>
+
+<p>A <code>Func</code> is its address and name, and after <code>//</code> the first line of its comment. A <code>Pointer</code> is its address and name, then the string it points at or its comment, and the function it lies in when it is not that function's start. An <code>Xref</code> is where it comes from, its kind, where it goes, and the function it comes from. A <code>Call</code> is its address and what is called, with the arguments when it has them. A <code><a href="#StringRef">StringRef</a></code> is its address and text, an <code>Insn</code> its address and disassembly. A tuple or list is its parts, each described this way, two spaces apart. Anything else is its <code>str</code>.</p>
+
+<h6 id="parameters">Parameters</h6>
+
+<ul>
+<li><strong>item</strong> (Any):
+The object.</li>
+<li><strong>width</strong> (int, default = None):
+Cut the line to this many characters.</li>
+</ul>
+
+<h6 id="returns">Returns</h6>
+
+<ul>
+<li><strong>str</strong></li>
+</ul>
+</div>
+
+
+                </section>
+                <section id="show">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">show</span><span class="signature pdoc-code condensed">(<span class="param"><span class="o">*</span><span class="n">items</span><span class="p">:</span> <span class="n">Any</span>, </span><span class="param"><span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span>, </span><span class="param"><span class="n">width</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">120</span></span><span class="return-annotation">):</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#show"></a>
+    
+            <div class="docstring"><p>Print objects one to a line, each as <code><a href="#describe">describe</a></code> gives it.</p>
+
+<h6 id="parameters">Parameters</h6>
+
+<ul>
+<li>*<strong>items</strong>: A list, a generator or another iterable prints a line for each thing in it, a <code>dict</code> a line for each key with its value. Anything else, a tuple included, prints one line.</li>
+<li><strong>limit</strong> (int, default = 40):
+Print only the first <code>limit</code> lines of each iterable, then a line <code>… N more</code>, or <code>… more</code> where the rest cannot be counted without going through it. <code>None</code> prints all of them.</li>
+<li><strong>width</strong> (int, default = 120):
+Cut every line to this many characters. <code>None</code> for whole lines.</li>
+</ul>
+</div>
+
+
                 </section>
                 <section id="rename_all">
                     <div class="attr function">

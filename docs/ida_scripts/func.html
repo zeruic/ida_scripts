@@ -43,9 +43,6 @@
                                 <a class="function" href="#Func.at">at</a>
                         </li>
                         <li>
-                                <a class="function" href="#Func.func_at">func_at</a>
-                        </li>
-                        <li>
                                 <a class="function" href="#Func.search">search</a>
                         </li>
                         <li>
@@ -133,6 +130,9 @@
                                 <a class="variable" href="#Func.strings">strings</a>
                         </li>
                         <li>
+                                <a class="function" href="#Func.outline">outline</a>
+                        </li>
+                        <li>
                                 <a class="function" href="#Func.to_dict">to_dict</a>
                         </li>
                 </ul>
@@ -166,7 +166,7 @@
                                 <a class="variable" href="#CFunc.pseudocode">pseudocode</a>
                         </li>
                         <li>
-                                <a class="variable" href="#CFunc.psuedocode">psuedocode</a>
+                                <a class="variable" href="#CFunc.calls">calls</a>
                         </li>
                         <li>
                                 <a class="function" href="#CFunc.text">text</a>
@@ -274,10 +274,19 @@
                                 <a class="variable" href="#Call.text">text</a>
                         </li>
                         <li>
+                                <a class="variable" href="#Call.args">args</a>
+                        </li>
+                        <li>
                                 <a class="function" href="#Call.to_dict">to_dict</a>
                         </li>
                 </ul>
 
+            </li>
+            <li>
+                    <a class="function" href="#grep">grep</a>
+            </li>
+            <li>
+                    <a class="function" href="#show_code">show_code</a>
             </li>
             <li>
                     <a class="function" href="#export_fingerprints">export_fingerprints</a>
@@ -353,7 +362,7 @@
     </div>
     <a class="headerlink" href="#Func.find"></a>
     
-            <div class="docstring"><p>Find function by name.</p>
+            <div class="docstring"><p>Find function by name, <code>None</code> when there is none. A name that is not there is tried with a leading underscore, so <code>main</code> finds a Mach-O file's <code>_main</code>.</p>
 </div>
 
 
@@ -370,22 +379,6 @@
     <a class="headerlink" href="#Func.at"></a>
     
             <div class="docstring"><p>The function containing an address, <code>None</code> when it is in no function.</p>
-</div>
-
-
-                            </div>
-                            <div id="Func.func_at" class="classattr">
-                                <div class="attr function">
-                    <div class="decorator decorator-staticmethod">@staticmethod</div>
-
-        <span class="def">def</span>
-        <span class="name">func_at</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">addr</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="n"><a href="../ida_scripts.html#Pointer">ida_scripts.Pointer</a></span></span><span class="return-annotation">) -> <span class="n"><a href="#Func">Func</a></span> <span class="o">|</span> <span class="kc">None</span>:</span></span>
-
-        
-    </div>
-    <a class="headerlink" href="#Func.func_at"></a>
-    
-            <div class="docstring"><p>The old name of <code><a href="#Func.at">Func.at</a></code>.</p>
 </div>
 
 
@@ -446,7 +439,9 @@ Stop after this many functions.</li>
     </div>
     <a class="headerlink" href="#Func.ignore"></a>
     
-            <div class="docstring"><p>Regular expressions of callee names that <code><a href="#Func.callees">Func.callees</a></code> and <code><a href="#Func.calls">Func.calls</a></code> leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (<code>re.search</code>). Empty by default.</p>
+            <div class="docstring"><p>Regular expressions of callee names that <code><a href="#Func.callees">Func.callees</a></code>, <code><a href="#Func.calls">Func.calls</a></code>, <code><a href="#Func.outline">Func.outline</a></code> and <code><a href="#CFunc.calls">CFunc.calls</a></code> leave out, such as runtime helpers that drown the list. Searched for anywhere in the name (<code>re.search</code>). Empty by default, and kept in the database when it is changed in place, as by <code>Func.ignore.update([r'^rt_'])</code>.</p>
+
+<p>Changed in place (<code>add</code>, <code>update</code>, <code>discard</code>, <code>clear</code>), the set is there again after the database was saved and opened again. Assigning a plain <code>set</code> instead uses those patterns until the process ends, and stores nothing.</p>
 </div>
 
 
@@ -683,7 +678,7 @@ Stop after this many functions.</li>
     </div>
     <a class="headerlink" href="#Func.is_thunk"></a>
     
-            <div class="docstring"><p>Whether IDA marks this function as a thunk, a function that only jumps to another one, such as an import stub.</p>
+            <div class="docstring"><p>Whether this function only jumps to another one: IDA marks it as a thunk, as it does an import stub, or it is a single jump to the start of another function.</p>
 </div>
 
 
@@ -803,6 +798,38 @@ Stop after this many functions.</li>
     <a class="headerlink" href="#Func.strings"></a>
     
             <div class="docstring"><p>The string literals the function refers to, as <code>(address, text)</code> sorted by address. Only strings that the database defines count.</p>
+</div>
+
+
+                            </div>
+                            <div id="Func.outline" class="classattr">
+                                <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">outline</span><span class="signature pdoc-code condensed">(<span class="param"><span class="bp">self</span>, </span><span class="param"><span class="n">width</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">120</span>, </span><span class="param"><span class="n">max_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">200</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#Func.outline"></a>
+    
+            <div class="docstring"><p>What the function does at a glance: the calls it makes, in order, and the texts it refers to.</p>
+
+<p>The first line has the function's address and name, and after <code>//</code> the first line of its comment. Then comes one line for each call: the address of the call, the name of the function called, and the first line of that function's comment. An indirect call shows as <code>(indirect)</code> with its operand, a tail call as <code>(tail)</code> with the name. Calls of the same function right after one another are one line that ends in their number, as in <code>x3</code>. Calls to a name that matches <code><a href="#Func.ignore">Func.ignore</a></code> are left out. Under a line <code>data</code> come the strings the function refers to, and the addresses it refers to that have a comment.</p>
+
+<h6 id="parameters">Parameters</h6>
+
+<ul>
+<li><strong>width</strong> (int, default = 120):
+Cut every line to this many characters. <code>None</code> for whole lines.</li>
+<li><strong>max_lines</strong> (int, default = 200):
+Keep only the first <code>max_lines</code> lines, then a line <code>… N more lines</code>. <code>None</code> for all of them.</li>
+</ul>
+
+<h6 id="returns">Returns</h6>
+
+<ul>
+<li><strong>str</strong>: The text, lines separated by <code>\n</code>.</li>
+</ul>
 </div>
 
 
@@ -941,15 +968,17 @@ Stop after this many functions.</li>
 
 
                             </div>
-                            <div id="CFunc.psuedocode" class="classattr">
+                            <div id="CFunc.calls" class="classattr">
                                 <div class="attr variable">
-            <span class="name">psuedocode</span><span class="annotation">: str</span>
+            <span class="name">calls</span><span class="annotation">: List[<a href="#Call">Call</a>]</span>
 
         
     </div>
-    <a class="headerlink" href="#CFunc.psuedocode"></a>
+    <a class="headerlink" href="#CFunc.calls"></a>
     
-            <div class="docstring"><p>The old, misspelt name of <code><a href="#CFunc.pseudocode">CFunc.pseudocode</a></code>.</p>
+            <div class="docstring"><p>The calls in the pseudocode with their arguments, in address order. Calls to a name that matches <code><a href="#Func.ignore">Func.ignore</a></code> are left out.</p>
+
+<p>Each <code><a href="#Call">Call</a></code> has <code>args</code>, the arguments as the pseudocode has them. A call to a function is <code>'direct'</code>, with the function's name as its <code><a href="#CFunc.text">text</a></code>. Any other is <code>'indirect'</code>, with the expression that is called as its <code><a href="#CFunc.text">text</a></code>. What the decompiler prints as a call and is none, such as <code>LODWORD(x)</code>, is left out.</p>
 </div>
 
 
@@ -958,23 +987,31 @@ Stop after this many functions.</li>
                                 <div class="attr function">
             
         <span class="def">def</span>
-        <span class="name">text</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="bp">self</span>,</span><span class="param">	<span class="n">decls</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>,</span><span class="param">	<span class="n">max_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">shorten</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+        <span class="name">text</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="bp">self</span>,</span><span class="param">	<span class="n">decls</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>,</span><span class="param">	<span class="n">max_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">shorten</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">start</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>,</span><span class="param">	<span class="n">hide</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">ignore</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
 
         
     </div>
     <a class="headerlink" href="#CFunc.text"></a>
     
-            <div class="docstring"><p>The pseudocode, optionally made shorter.</p>
+            <div class="docstring"><p>The pseudocode, without the declarations of its local variables. The options cut it to a window (<code>start</code>, <code>max_lines</code>), shorten long identifiers (<code>shorten</code>), and leave statements out (<code>hide</code> by a regular expression, <code>ignore</code> for the calls of functions in <code><a href="#Func.ignore">Func.ignore</a></code>).</p>
+
+<p>A statement that <code>hide</code> or <code>ignore</code> takes out takes with it what it would leave empty: the <code>if</code> or <code>else</code> it was the whole body of, and a block with nothing left in it. Where that would change how the rest reads, as for the first branch of an <code>if</code> that has an <code>else</code>, or the body of a loop, the statement stays. A last line <code>// … N lines hidden</code> says how many lines went.</p>
 
 <h6 id="parameters">Parameters</h6>
 
 <ul>
-<li><strong>decls</strong> (bool, default = True):
-<code>False</code> leaves out the declarations of the local variables at the top of the body, and the blank line after them.</li>
+<li><strong>decls</strong> (bool, default = False):
+<code>True</code> keeps the declarations of the local variables at the top of the body, and the blank line after them.</li>
 <li><strong>max_lines</strong> (int, default = None):
 Keep only the first <code>max_lines</code> lines, then a line <code>// … N more lines</code> saying how many were cut.</li>
 <li><strong>shorten</strong> (int, default = None):
 Cut every identifier longer than <code>shorten</code> characters to its first <code>shorten</code> characters followed by <code>…</code>. String literals and comments stay as they are.</li>
+<li><strong>start</strong> (int, default = 0):
+Leave out the first <code>start</code> lines, with a line <code>// … N lines above</code> in their place. Together with <code>max_lines</code> this shows a window, such as what an earlier call cut off. The lines are counted after <code>decls</code>, <code>hide</code> and <code>ignore</code> took theirs out.</li>
+<li><strong>hide</strong> (str or iterable of str, default = None):
+Leave out every line that one of these regular expressions matches (<code>re.search</code>), as a whole statement, see below.</li>
+<li><strong>ignore</strong> (bool, default = False):
+Leave out the statements that only call a function matching <code><a href="#Func.ignore">Func.ignore</a></code>, such as <code>init_once(&amp;flag);</code>. A call whose result is used stays.</li>
 </ul>
 
 <h6 id="returns">Returns</h6>
@@ -1384,8 +1421,7 @@ Example of a match:</p>
                 </section>
                 <section id="Call">
                     <div class="attr class">
-                    <div class="decorator decorator-auto_repr">@auto_repr([&#39;site&#39;, &#39;kind&#39;, &#39;target&#39;, &#39;text&#39;], {&#39;site&#39;: hex, &#39;target&#39;: lambda f: hex(f.start)})</div>
-
+            
     <span class="def">class</span>
     <span class="name">Call</span>:
 
@@ -1400,13 +1436,13 @@ Example of a match:</p>
                             <div id="Call.__init__" class="classattr">
                                 <div class="attr function">
             
-        <span class="name">Call</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">site</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">target</span><span class="p">:</span> <span class="n"><a href="#Func">Func</a></span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">text</span><span class="p">:</span> <span class="nb">str</span></span>)</span>
+        <span class="name">Call</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">site</span><span class="p">:</span> <span class="nb">int</span>,</span><span class="param">	<span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">target</span><span class="p">:</span> <span class="n"><a href="#Func">Func</a></span> <span class="o">|</span> <span class="kc">None</span>,</span><span class="param">	<span class="n">text</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">args</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span></span>)</span>
 
         
     </div>
     <a class="headerlink" href="#Call.__init__"></a>
     
-            <div class="docstring"><p>Init with the calling instruction's address, the kind of call, the called function and its text.</p>
+            <div class="docstring"><p>Init with the calling instruction's address, the kind of call, the called function, its text, and the arguments when the call was taken from pseudocode.</p>
 </div>
 
 
@@ -1458,7 +1494,20 @@ Example of a match:</p>
     </div>
     <a class="headerlink" href="#Call.text"></a>
     
-            <div class="docstring"><p>The target's name (its address when it has none), or the operand of an indirect call such as <code>'X8'</code>.</p>
+            <div class="docstring"><p>The target's name (its address when it has none), or what an indirect call goes through: the operand such as <code>'X8'</code>, or the expression in a call from <code><a href="#CFunc.calls">CFunc.calls</a></code>.</p>
+</div>
+
+
+                            </div>
+                            <div id="Call.args" class="classattr">
+                                <div class="attr variable">
+            <span class="name">args</span><span class="annotation">: List[str] | None</span>
+
+        
+    </div>
+    <a class="headerlink" href="#Call.args"></a>
+    
+            <div class="docstring"><p>The arguments as the pseudocode has them, in a call from <code><a href="#CFunc.calls">CFunc.calls</a></code>. <code>None</code> in a call from <code><a href="#Func.calls">Func.calls</a></code>, which reads the instructions.</p>
 </div>
 
 
@@ -1473,11 +1522,71 @@ Example of a match:</p>
     </div>
     <a class="headerlink" href="#Call.to_dict"></a>
     
-            <div class="docstring"><p>The main properties as a JSON-friendly <code>dict</code>, addresses as hex strings.</p>
+            <div class="docstring"><p>The call as a JSON-friendly <code>dict</code>, addresses as hex strings. <code><a href="#Call.args">args</a></code> is there when the call has them.</p>
 </div>
 
 
                             </div>
+                </section>
+                <section id="grep">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">grep</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">pattern</span><span class="p">:</span> <span class="nb">str</span>,</span><span class="param">	<span class="n">funcs</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="n"><a href="../ida_scripts.html#Pointer">ida_scripts.Pointer</a></span> <span class="o">|</span> <span class="n"><a href="#Func">Func</a></span><span class="p">]</span>,</span><span class="param">	<span class="n">context</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>,</span><span class="param">	<span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">str</span>:</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#grep"></a>
+    
+            <div class="docstring"><p>The pseudocode lines of several functions that match a regular expression: <code><a href="#CFunc.grep">CFunc.grep</a></code> over each of them.</p>
+
+<h6 id="parameters">Parameters</h6>
+
+<ul>
+<li><strong>pattern</strong> (str):
+Searched for anywhere in a line (<code>re.search</code>).</li>
+<li><strong>funcs</strong> (iterable):
+The functions to look in, each a <code><a href="#Func">Func</a></code> or anything <code><a href="#Func">Func</a></code> takes. <code><a href="#Func.search">Func.search</a>(r'^Player::')</code> gives such a list.</li>
+<li><strong>context</strong> (int, default = 0):
+How many lines to show before and after each match.</li>
+<li><strong>limit</strong> (int, default = None):
+Stop after this many functions had a match.</li>
+</ul>
+
+<h6 id="returns">Returns</h6>
+
+<ul>
+<li><strong>str</strong>: For each function with a match: a line with its address and name, then its matching lines as <code><a href="#CFunc.grep">CFunc.grep</a></code> gives them. A blank line separates the functions. A function that cannot be decompiled is skipped, and a last line <code>// N not decompiled: …</code> names those. <code>''</code> when nothing matches.</li>
+</ul>
+</div>
+
+
+                </section>
+                <section id="show_code">
+                    <div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">show_code</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="o">*</span><span class="n">targets</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="n"><a href="../ida_scripts.html#Pointer">ida_scripts.Pointer</a></span> <span class="o">|</span> <span class="n"><a href="#Func">Func</a></span>,</span><span class="param">	<span class="n">max_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">120</span>,</span><span class="param">	<span class="o">**</span><span class="n">options</span></span><span class="return-annotation">):</span></span>
+
+        
+    </div>
+    <a class="headerlink" href="#show_code"></a>
+    
+            <div class="docstring"><p>Print the pseudocode of one or more functions, each under a line with its address and name.</p>
+
+<p>The name in that line is IDA's, which the pseudocode may spell differently. A function that cannot be decompiled prints the reason in its place, and the others still print.</p>
+
+<h6 id="parameters">Parameters</h6>
+
+<ul>
+<li>*<strong>targets</strong>: Each a <code><a href="#Func">Func</a></code>, anything <code><a href="#Func">Func</a></code> takes, or a list of those.</li>
+<li><strong>max_lines</strong> (int, default = 120):
+Print only the first <code>max_lines</code> lines of each function, as <code><a href="#CFunc.text">CFunc.text</a></code> cuts them. <code>None</code> prints all of it.</li>
+<li>**<strong>options</strong>: The other options of <code><a href="#CFunc.text">CFunc.text</a></code>: <code>decls</code>, <code>shorten</code>, <code>start</code>, <code>hide</code> and <code>ignore</code>.</li>
+</ul>
+</div>
+
+
                 </section>
                 <section id="export_fingerprints">
                     <div class="attr function">

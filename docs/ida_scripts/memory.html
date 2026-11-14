@@ -52,9 +52,6 @@
                                 <a class="function" href="#Pointer.swap">swap</a>
                         </li>
                         <li>
-                                <a class="function" href="#Pointer.read_write_with_struct">read_write_with_struct</a>
-                        </li>
-                        <li>
                                 <a class="function" href="#Pointer.u8">u8</a>
                         </li>
                         <li>
@@ -384,21 +381,6 @@ Read the memory back and report whether it holds the data.</p></li>
     <a class="headerlink" href="#Pointer.swap"></a>
     
             <div class="docstring"><p>Write <code>data</code> to the debugged process and return the bytes it replaced.</p>
-</div>
-
-
-                            </div>
-                            <div id="Pointer.read_write_with_struct" class="classattr">
-                                <div class="attr function">
-            
-        <span class="def">def</span>
-        <span class="name">read_write_with_struct</span><span class="signature pdoc-code condensed">(<span class="param"><span class="bp">self</span>, </span><span class="param"><span class="nb">format</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">value</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">=</span> <span class="kc">None</span></span><span class="return-annotation">) -> <span class="nb">int</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">|</span> <span class="nb">bool</span>:</span></span>
-
-        
-    </div>
-    <a class="headerlink" href="#Pointer.read_write_with_struct"></a>
-    
-            <div class="docstring"><p>Read/Write a value described by one <code>struct</code> format character.</p>
 </div>
 
 
@@ -875,13 +857,15 @@ When the name is taken, let IDA use a numbered variant such as <code>name_0</cod
                                 <div class="attr function">
             
         <span class="def">def</span>
-        <span class="name">disasm</span><span class="signature pdoc-code condensed">(<span class="param"><span class="bp">self</span>, </span><span class="param"><span class="n">count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span></span><span class="return-annotation">) -> <span class="n">List</span><span class="p">[</span><span class="n"><a href="#Insn">Insn</a></span><span class="p">]</span>:</span></span>
+        <span class="name">disasm</span><span class="signature pdoc-code condensed">(<span class="param"><span class="bp">self</span>, </span><span class="param"><span class="n">count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>, </span><span class="param"><span class="n">before</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span></span><span class="return-annotation">) -> <span class="n">List</span><span class="p">[</span><span class="n"><a href="#Insn">Insn</a></span><span class="p">]</span>:</span></span>
 
         
     </div>
     <a class="headerlink" href="#Pointer.disasm"></a>
     
-            <div class="docstring"><p>Decode <code>count</code> consecutive instructions starting here. Stops early at the first undecodable one.</p>
+            <div class="docstring"><p>Decode <code>count</code> consecutive instructions starting here, after up to <code>before</code> instructions that lead up to this address. Stops early at the first undecodable one.</p>
+
+<p>The instructions in front are for what sets up the arguments of a call, say. They are the code the database defines right in front of this address, and they stop at the start of a function.</p>
 </div>
 
 
