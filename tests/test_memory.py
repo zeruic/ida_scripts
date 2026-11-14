@@ -306,6 +306,19 @@ class TestCode(harness.IDATestCase):
 		self.assertEqual(len(ptr('_compute').disasm()), 1)
 		self.assertEqual(ptr('_hero').disasm(4), [])
 
+	def test_pointer_disasm_with_what_leads_up(self):
+		compute = Func('_compute')
+		insns = compute.insns
+		call = next(n for n, insn in enumerate(insns) if insn.is_call)
+		self.assertGreaterEqual(call, 3)
+		self.assertEqual(ptr(insns[call].address).disasm(1, before=3), insns[call - 3:call + 1])
+		self.assertEqual(ptr(insns[call].address).disasm(2, before=1), insns[call - 1:call + 2])
+		self.assertEqual(ptr(insns[call].address).disasm(0, before=2), insns[call - 2:call])
+		# Not past the start of the function.
+		self.assertEqual(ptr(insns[call].address).disasm(1, before=100), insns[:call + 1])
+		self.assertEqual(ptr(compute.start).disasm(1, before=5), insns[:1])
+		self.assertEqual(ptr('_hero').disasm(1, before=3), [])
+
 	def test_disasm_range(self):
 		start, end = sym('add'), sym('leaf')
 		insns = disasm(start, end)

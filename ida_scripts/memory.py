@@ -332,8 +332,19 @@ class Pointer:
 		''' References from this address, ordinary flow to the next instruction left out. '''
 		return [Xref(x.frm, x.to, x.type) for x in idautils.XrefsFrom(self.addr, 0) if x.type != ida_xref.fl_F]
 
-	def disasm(self, count: int = 1) -> List['Insn']:
-		''' Decode `count` consecutive instructions starting here. Stops early at the first undecodable one. '''
+	def disasm(self, count: int = 1, before: int = 0) -> List['Insn']:
+		''' Decode `count` consecutive instructions starting here, after up to `before` instructions that lead up to this address. Stops early at the first undecodable one.
+
+		The instructions in front are for what sets up the arguments of a call, say. They are the code the database defines right in front of this address, and they stop at the start of a function.
+		'''
+		leading = []
+		ea = self.addr
+		for _ in range(before):
+			previous = ida_bytes.prev_head(ea, 0)
+			if compat.func_start(ea) == ea or previous == compat.BADADDR or not ida_bytes.is_code(ida_bytes.get_flags(previous)) or previous + ida_bytes.get_item_size(previous) != ea:
+				break
+			leading.insert(0, Insn(previous))
+			ea = previous
 		insns = []
 		ea = self.addr
 		for _ in range(count):
@@ -343,7 +354,7 @@ class Pointer:
 				break
 			insns.append(insn)
 			ea += insn.size
-		return insns
+		return leading + insns
 
 	# OPERATORS
 	def __add__(self, other: Union['Pointer', int]) -> 'Pointer':

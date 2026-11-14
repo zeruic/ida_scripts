@@ -71,7 +71,7 @@ Provides class(es) for reading and writing memory, of the database or of the deb
 - `module: Module | None` The module of the debugged process containing this address, `None` when there is none.
 - `xrefs_to() -> List[Xref]` References to this address, ordinary flow from the previous instruction left out.
 - `xrefs_from() -> List[Xref]` References from this address, ordinary flow to the next instruction left out.
-- `disasm(count: int = 1) -> List[Insn]` Decode `count` consecutive instructions starting here. Stops early at the first undecodable one.
+- `disasm(count: int = 1, before: int = 0) -> List[Insn]` Decode `count` consecutive instructions starting here, after up to `before` instructions that lead up to this address. Stops early at the first undecodable one.
 - `self + other`
 - `self - other`
 - `add(other: Union[Pointer, int]) -> Pointer` `self + other`.
