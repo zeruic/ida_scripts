@@ -1,11 +1,13 @@
 ---
 name: ida-scripts
-description: Use ida_scripts, a Python library for IDA Pro 9.x, to reverse engineer and debug binaries with short calls instead of raw IDAPython. Covers functions and pseudocode (search, callers, callees, strings, grep), memory and struct reads, bulk renames and comments, moving names and annotations between databases or builds, and a debugger with breakpoint handlers, registers, call stacks and calls into the process. Use this skill whenever the task involves IDA Pro, an .i64 or .idb database, the IDA MCP (open_database, execute_python), idalib, decompiling or disassembling a binary, renaming or annotating functions, declaring structs, or debugging, tracing or setting breakpoints in a process, even when the user does not mention ida_scripts. Read it before writing any IDAPython or ida-domain code and before starting a debugging session, because it says where state lives between calls.
+description: Use ida_scripts, a Python library for IDA Pro 9.x, to reverse engineer and debug binaries with short calls instead of raw IDAPython. Covers functions and pseudocode (search, outlines, callers, callees, calls with their arguments, strings, grep over one function or many), memory and struct reads, bulk renames and comments, moving names and annotations between databases or builds, and a debugger with breakpoint handlers, registers, call stacks and calls into the process. Use this skill whenever the task involves IDA Pro, an .i64 or .idb database, the IDA MCP (open_database, execute_python), idalib, decompiling or disassembling a binary, renaming or annotating functions, declaring structs, or debugging, tracing or setting breakpoints in a process, even when the user does not mention ida_scripts. Read it before writing any IDAPython or ida-domain code and before starting a debugging session, because it says where state lives between calls.
 ---
 
 # ida_scripts
 
-`ida_scripts` is a Python library over IDAPython for IDA 9.x. It turns the daily moves of reverse engineering into short calls (`func('update').pseudocode(max_lines=40)`, `f.callers`, `StrucT.find('Player').instance_at(addr).to_dict()`, `Breakpoint.add(..., handler=...)`), and it already steps around the traps of IDA 9.4, where much of the older API is deprecated or gone. Reach for it first, and drop to raw IDAPython only for what it does not cover.
+`ida_scripts` is a Python library over IDAPython for IDA 9.x. It turns the daily moves of reverse engineering into short calls (`print(func('update').outline())`, `show(f.callers)`, `StrucT.find('Player').instance_at(addr).to_dict()`, `Breakpoint.add(..., handler=...)`), and it already steps around the traps of IDA 9.4, where much of the older API is deprecated or gone. Reach for it first, and drop to raw IDAPython only for what it does not cover.
+
+Read `references/api.md` once before the first call. It is one page, and it is the whole library. Sessions that skipped it wrote by hand, again and again, what one name there already did.
 
 The library is the repository this skill ships in. `${CLAUDE_SKILL_DIR}` is the folder this file is in (when you see that placeholder unfilled, put the folder's path in its place), and the repository is two folders above it: that folder holds the `ida_scripts` package. It is called REPO below.
 
@@ -30,13 +32,17 @@ assert os.path.isdir(os.path.join(repo, 'ida_scripts')), f'{repo} is not the ida
 if repo not in sys.path:
 	sys.path.insert(0, repo)
 from ida_scripts import *
-jsonable(Database.current())
+jsonable({'repo': repo, 'database': Database.current(), 'ignore': sorted(Func.ignore)})
 ```
+
+The first lines only find the repository. `repo` in the result is a plain path, and after another `open_database` two lines with that path written out do the same: `import sys; sys.path.insert(0, '/that/path')`, then `from ida_scripts import *`.
 
 From then on every `execute_python` call on that database runs in the same namespace, on IDA's main thread. This is what makes stateful work possible, so use it:
 
 - Keep handles in variables (`f = func('update')`, `player = ...`) and reuse them in later calls. Imports, variables, `dbg`, breakpoints and handlers all stay until `close_database`.
-- The value of the last expression comes back, and it has to be JSON. Library objects are not, so wrap what you return in `jsonable(...)`, which takes any nesting of objects, lists and dicts. `print(...)` works as well and shows each object's short form.
+- Keep the database open until the question is answered. Every `close_database` costs the namespace, and a session that closes after each step spends its calls on setting up again.
+- What you learn belongs in the database, not in variables. Names, comments, prototypes, struct types and `Func.ignore` are saved with it and are there the next time. A `dict` in the namespace is gone at `close_database`.
+- What a call prints comes back with its result, and printing is the short way to look: `show(f.callers)` prints a line for each object, `print(f.outline())` and `show_code(f)` print text that is already cut to size. The value of the last expression comes back too, and it has to be JSON. Library objects are not, so wrap them in `jsonable(...)`, which takes any nesting of objects, lists and dicts, when you want data rather than a listing.
 - A call that raises, or that runs into its timeout (360 s unless you pass `timeout`), is cut off where it stands. The namespace survives, with whatever the call had assigned before that point.
 - The MCP's own `db` (an ida-domain database) and its `reference` tool are still there and mix freely with the library. Do not reuse the name `db`.
 - `close_database` saves the database and ends the process, and a program being debugged dies with it. Opening the database again gives an empty namespace, so run the lines above again. That is also the sure way to pick up an edit to the library itself. `exec(open(os.path.join(repo, 'load.py')).read())` reloads it in place where the worker allows it (it did in an idalib worker on Windows and failed in an `idat` worker on macOS), and leaves a new `dbg` with no handlers.
@@ -62,31 +68,49 @@ The database of a binary is `<binary>.i64` beside it, written only by `db.save()
 
 - **Anything that means an address** can be an `int`, a `'0x…'` string, a symbol name, a `Pointer` or a `Func`. So `func('update')`, `ptr('g_config')` and `Breakpoint.add('update')` all work without a lookup first.
 - **Addresses come back as `Pointer`** wherever one is handed to you (`ptr(...)`, `dbg.pc`, `event.address`, `StringRef.address`, an `Xref`'s `frm` and `to`). `.addr` is the `int`, `p + 8` is another `Pointer`, and a `Pointer` equals another `Pointer` or an `int` with the same address. `Func.start`, `Call.site` and `Module.addr` are plain ints. `references/api.md` gives the type of every property.
-- **Names are IDA's names.** A C symbol in a Mach-O file has a leading underscore (`_main`), a C++ one is mangled. A name the database lacks raises `LookupError`. When unsure of the spelling, search: `Func.search(r'main$')`, `search_names(r'config')` (`Pointer`s, each with its `.name`). `Func.find(name)` returns `None` instead of raising.
+- **Names are IDA's names.** A C symbol in a Mach-O file has a leading underscore (`_main`), and a lookup that finds no `main` tries `_main`, so either spelling works. A C++ name is mangled. A name the database lacks raises `LookupError`. When unsure of the spelling, search: `Func.search(r'main$')`, `search_names(r'config')` (`Pointer`s, each with its `.name`). `Func.find(name)` and `find_symbol(name)` return `None` instead of raising.
+- **The pseudocode spells names its own way.** `_add` is `add` there, and a character C does not allow becomes `_`, so a name made of such characters is a row of underscores. `f.outline()`, `f.calls` and the first line `show_code` prints have IDA's names.
 - **Reads follow the debugger.** `Pointer` and struct reads come from the debugged process while there is one and from the database otherwise, so the same line works in both. Writes go to the process only.
-- **Errors say what was attempted.** They are `IDAError`, with `DecompileError` and `DebuggerError` as its kinds.
-- **Ask the library.** `help(Func.search)` in the session prints the full docstring, and what a call prints comes back with its result. `references/api.md` lists every public name with its signature and one line, and is the place to look before guessing a method.
-- **Keep the output small.** Pseudocode and whole-database listings are how a session drowns. Cap them (`max_lines`, `limit`, a slice), grep instead of dumping, and write anything large to a file (`CFunc.save(path)`, `json.dump`) that you then search.
+- **Errors say what was attempted.** They are `IDAError`, with `DecompileError` and `DebuggerError` as its kinds. Do not wrap calls in `try`/`except` to be safe. What finds nothing says so plainly (`Func.at` and `Func.find` return `None`, `call.target` is `None` for an indirect call), and the one failure to expect in a loop over functions, a `DecompileError`, is handled by `show_code` and `grep` themselves.
+- **Ask the library.** `help(Func.search)` in the session prints the full docstring. `references/api.md` lists every public name with its signature and one line, and is the place to look before writing a helper of your own.
+- **Keep the output small.** Pseudocode and whole-database listings are how a session drowns. `show`, `show_code` and `f.outline()` cut what they print unless told otherwise. For the rest, cap it (`max_lines`, `start`, `limit`), leave the runtime's noise out (`ignore=True`, `hide=`), grep instead of dumping, and write anything large to a file (`CFunc.save(path)`, `json.dump`) that you then search.
 
 ## Reading a binary
 
 ```python
 f = func('update')                                    # by name or address. Func.at(ea): the function containing ea
-f.name, f.prototype, f.comment                        # read them, or assign to change them
-Func.search(r'^Player::', limit=50)                   # regex over every name
-print(f.pseudocode(decls=False, max_lines=60, shorten=40))
+print(f.outline())                                    # the calls it makes, in order, each with its comment, then the strings it uses
+show_code(f, max_lines=60)                            # its pseudocode under its name in IDA. show_code(f, g, h) prints several
+print(f.pseudocode(start=60, max_lines=60, shorten=40))   # the next 60 lines, long identifiers cut
 print(f.decompile().grep(r'hp|health', context=1))    # like grep -n over the pseudocode
-[c.name for c in f.callers], [c.name for c in f.callees]
-[(c.kind, c.text, c.site) for c in f.calls]           # each call f makes, in order: 'direct', 'tail' or 'indirect'. c.target is the Func
-[(x.func, x.kind) for x in f.xrefs_to]                # each use of f: 'call', 'jump' (a tail call) or 'offset' (its address is taken)
-f.strings                                             # [(address, text)] the function refers to
-[(s.address, s.text, [g.name for g in s.funcs]) for s in strings(r'(?i)password')]
-ptr('g_count').u32(), ptr('g_name').ptr().string(), ptr('g_table').array('i', 4)
-ptr('g_count').xrefs_to()                             # Xref: frm, to, kind ('call', 'read', 'write', …), func
-[i.text for i in ptr(0x401000).disasm(8)]
+print(grep(r'\+ 568\) = ', Func.search(r'^Player::')))    # the same over many functions: who writes that field?
+show(f.callers, f.callees)                            # a line for each: address, name, comment
+show(f.decompile().calls)                             # each call with its arguments, as the pseudocode has them
+show(f.calls)                                         # each call instruction: 'direct', 'tail' or 'indirect'. c.target is the Func, c.site the address
+show(f.xrefs_to)                                      # each use of f: 'call', 'jump' (a tail call) or 'offset' (its address is taken)
+f.name, f.prototype, f.comment                        # read them, or assign to change them
+Func.search(r'^Player::', limit=50)                   # regex over every name. search_comments(r'…') is the same over comments
+show(strings(r'(?i)password'))                        # s.funcs are the functions that use the string. f.strings: the strings of one function
+p = ptr('g_count')
+p.name, p.comment, p.segment, p.rva                   # Database.current().image_base is what rva counts from
+p.u32(), ptr('g_name').ptr().string(), ptr('g_table').array('i', 4)
+show(p.xrefs_to())                                    # Xref: frm, to, kind ('call', 'read', 'write', …), func
+print(f.disasm())                                     # every instruction of f. [i.text for i in ptr(0x401000).disasm(8)] for a few
+show(ptr(0x401060).disasm(1, before=10))              # a call and the ten instructions that lead up to it, where the pseudocode lost the arguments
+f.is_thunk, f.thunk_target                            # whether f only jumps to another function, and to which
 ```
 
 IDA 9.4 prints argument names inside calls, as in `compute(a1: argc)`. That is the decompiler's hint style, not part of the code.
+
+A runtime's helpers drown every list: a null check, a lazy initialiser, a reference count. Say once which callees are noise, and they are gone from `f.calls`, `f.callees`, `f.outline()` and `f.decompile().calls`:
+
+```python
+Func.ignore.update([r'^rt_check', r'_init_once$'])    # regular expressions over callee names, kept in the database
+show_code(f, ignore=True)                             # also leaves out the statements that only call one of them
+show_code(f, ignore=True, hide=r'guard_\w+ = 1;')     # and the lines a pattern of your own matches
+```
+
+`ignore` and `hide` take a statement out together with what it would leave empty, such as the `if` around a null check, and keep it where the rest would read differently without it. A last line says how many lines went.
 
 Structs are declared from C text and then read at any address:
 
@@ -111,6 +135,8 @@ apply_prototypes({'parse_header': 'int __fastcall parse_header(Header *h, int si
 ```
 
 Each returns how many entries it changed. Two quiet outcomes are worth a check afterwards. `rename_all` uses a numbered variant (`name_0`) when a name is taken, which `Func.find(name)` or `find_symbol(name)` shows. `apply_prototypes` skips a prototype IDA refuses, and the count is short then.
+
+Knowledge that comes from outside the binary goes in the same way, once: a symbol list, or the signatures another tool wrote out. As comments it is in `f.comment`, in `f.outline()` beside every call, and in reach of `search_comments`, in every later session. A table rebuilt in the namespace at each open is none of that.
 
 Edits stay in memory until the database is saved: `save_database` through the MCP, `db.save()` in a script. `Database.current().save('/path/snapshot.i64')` writes a copy and keeps working on the original, a cheap checkpoint before a large change, since closing through the MCP saves whatever is there.
 

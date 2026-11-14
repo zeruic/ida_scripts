@@ -19,12 +19,18 @@ This is just an overview, please check the documentations below for the full set
 		- Find by name, address, or regex over all names
 		- Rename, comment, C prototype
 		- Callers, callees, and every call it makes (direct, tail or indirect)
+		- An outline: its calls in order, each with the callee's comment, and the strings it uses
+		- A list of callee names to ignore, kept in the database, for the runtime helpers that drown every list
 		- Strings and data it refers to, instructions, chunks
+		- Thunks and where they jump, also the single jumps IDA does not mark
 		- Fingerprint, to find the same function in another build
 		- Decompile to yield `CFunc`
 	- `CFunc`
-		- Get pseudocode, without the local declarations, cut to a length, or with long identifiers shortened
+		- Get pseudocode, cut to a length or to a window, with long identifiers shortened, with or without the local declarations
+		- Leave out the statements that only call an ignored function, or the lines a pattern matches, together with the `if` they would leave empty
+		- Every call with its arguments
 		- `grep` inside it, save it to a file
+	- `grep` over the pseudocode of many functions, `show_code` to print several functions
 		- Get body represented as a networkx.DiGraph (really just a tree)
 			- Each node is a `CItem`
 	- `CItem`
@@ -69,6 +75,7 @@ This is just an overview, please check the documentations below for the full set
 		- Translate addresses between the process and the database
 - `misc`
 	- Search names, comments and strings by regex
+	- `show` prints any list of the library's objects, a line for each
 	- Name and comment many addresses at once
 	- Export every annotation of a database, import it into another copy
 - `session`
@@ -86,9 +93,9 @@ from ida_scripts import *
 
 with Database.open('target.i64'):
 	f = func('main')
-	print(f.pseudocode(decls=False, max_lines=40))
-	print([caller.name for caller in f.callers])
-	print([(call.kind, call.text) for call in f.calls])
+	print(f.outline())
+	print(f.pseudocode(max_lines=40))
+	show(f.callers, f.decompile().calls)
 	for found in Func.search(r'^Player::'):
 		print(found, found.strings)
 ```
